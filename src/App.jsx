@@ -148,9 +148,9 @@ export default function App() {
       return;
     }
 
-    const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+    const apiKey = import.meta.env.VITE_GROQ_API_KEY;
     if (!apiKey) {
-      setReview("❌ 未設定 Gemini API Key。\n\n請在 Vercel 環境變數中設定：\nVITE_GEMINI_API_KEY=AIza...\n\n免費取得：aistudio.google.com");
+      setReview("❌ 未設定 Groq API Key。\n\n請在 Vercel 環境變數中設定：\nVITE_GROQ_API_KEY=gsk_...\n\n免費取得：console.groq.com");
       return;
     }
 
@@ -200,20 +200,22 @@ ${content}
 
 [動詞 + 具體目標 + 截止時間]`;
 
-      const resp = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
-        {
-          method: "POST",
-          headers: {"Content-Type": "application/json"},
-          body: JSON.stringify({
-            contents: [{parts: [{text: prompt}]}],
-            generationConfig: {maxOutputTokens: 1200, temperature: 0.7},
-          }),
-        }
-      );
+      const resp = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model: "llama-3.3-70b-versatile",
+          max_tokens: 1200,
+          temperature: 0.7,
+          messages: [{role: "user", content: prompt}],
+        }),
+      });
       const data = await resp.json();
       if (data.error) throw new Error(data.error.message);
-      const t = data.candidates?.[0]?.content?.parts?.[0]?.text || "生成失敗，請重試。";
+      const t = data.choices?.[0]?.message?.content || "生成失敗，請重試。";
       setReview(t);
       sSet(`r:${wk}`, t);
     } catch(e) {
