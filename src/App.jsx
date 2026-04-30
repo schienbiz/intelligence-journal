@@ -136,7 +136,6 @@ export default function App() {
 
   const loadSample = () => setText(SAMPLE[route] || "");
 
-  // FIX 3: added x-api-key + anthropic-version headers; fixed model name; fixed spread operators
   const doReview = async () => {
     const content = weekData.map((d, i) => {
       const f = ROUTES.filter(r => d.entries[r]?.trim());
@@ -149,27 +148,16 @@ export default function App() {
       return;
     }
 
-    const apiKey = import.meta.env.VITE_ANTHROPIC_API_KEY;
+    const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
     if (!apiKey) {
-      setReview("❌ 未設定 API Key。\n\n請在專案根目錄建立 .env 檔案：\nVITE_ANTHROPIC_API_KEY=sk-ant-...");
+      setReview("❌ 未設定 Gemini API Key。\n\n請在 Vercel 環境變數中設定：\nVITE_GEMINI_API_KEY=AIza...\n\n免費取得：aistudio.google.com");
       return;
     }
 
     setRevLoading(true);
     setReview("");
     try {
-      const resp = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": apiKey,
-          "anthropic-version": "2023-06-01",
-          "anthropic-dangerous-direct-browser-access": "true",
-        },
-        body: JSON.stringify({
-          model: "claude-sonnet-4-6",
-          max_tokens: 1000,
-          messages: [{role: "user", content:
+      const prompt =
 `你是 Boss Tung 的人生合夥人。以下是本週（${wk}）三個情報 Routine 的報告。
 
 執行【週六優化複盤】：
@@ -210,13 +198,22 @@ ${content}
 
 ## 🚀 下週 One Thing
 
-[動詞 + 具體目標 + 截止時間]`
-          }]
-        })
-      });
+[動詞 + 具體目標 + 截止時間]`;
+
+      const resp = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+        {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({
+            contents: [{parts: [{text: prompt}]}],
+            generationConfig: {maxOutputTokens: 1200, temperature: 0.7},
+          }),
+        }
+      );
       const data = await resp.json();
       if (data.error) throw new Error(data.error.message);
-      const t = data.content?.find(c => c.type === "text")?.text || "生成失敗，請重試。";
+      const t = data.candidates?.[0]?.content?.parts?.[0]?.text || "生成失敗，請重試。";
       setReview(t);
       sSet(`r:${wk}`, t);
     } catch(e) {
