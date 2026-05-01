@@ -137,10 +137,16 @@ export default function App() {
   const loadSample = () => setText(SAMPLE[route] || "");
 
   const doReview = async () => {
+    // Truncate each entry to 600 chars to stay within Groq free tier 12k TPM limit
+    const ENTRY_LIMIT = 600;
     const content = weekData.map((d, i) => {
       const f = ROUTES.filter(r => d.entries[r]?.trim());
       if (!f.length) return null;
-      return `=== ${DAYS_ZH[i]} ===\n` + f.map(r => `[${RM[r].full}]\n${d.entries[r]}`).join("\n\n");
+      return `=== ${DAYS_ZH[i]} ===\n` + f.map(r => {
+        const text = d.entries[r];
+        const truncated = text.length > ENTRY_LIMIT ? text.slice(0, ENTRY_LIMIT) + "…" : text;
+        return `[${RM[r].full}]\n${truncated}`;
+      }).join("\n\n");
     }).filter(Boolean).join("\n\n—\n\n");
 
     if (!content.trim()) {
