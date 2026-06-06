@@ -9,7 +9,20 @@ app.use(express.static(path.join(__dirname, 'dist')))
 
 app.get('/health', (_, res) => res.json({ ok: true }))
 
-app.post('/api/review', async (req, res) => {
+// ── Simple per-IP rate limit: max 8 reviews per minute ────────────────────────
+const rateMap = new Map()
+function rateLimit(req, res, next) {
+  const ip = req.ip || req.socket?.remoteAddress || 'unknown'
+  const now = Date.now()
+  const prev = (rateMap.get(ip) || []).filter(t => now - t < 60_000)
+  prev.push(now)
+  rateMap.set(ip, prev)
+  if (prev.length > 8) return res.status(429).json({ error: '請求過於頻繁，請稍後再試。' })
+  next()
+}
+
+// ── /api/review — SSE streaming ───────────────────────────────────────────────
+app.post('/api/review', rateLimit, async (req, res) => {
   const { content, weekKey } = req.body
   if (!content?.trim()) return res.status(400).json({ error: 'no content' })
 
@@ -60,21 +73,58 @@ ${content}
 [動詞 + 具體目標 + 截止時間]`
 
   try {
-    const resp = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    const upstream = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
       body: JSON.stringify({
         model: 'llama-3.3-70b-versatile',
         max_tokens: 1200,
         temperature: 0.7,
+        stream: true,
         messages: [{ role: 'user', content: prompt }],
       }),
     })
-    const data = await resp.json()
-    if (data.error) return res.status(502).json({ error: data.error.message })
-    res.json({ text: data.choices?.[0]?.message?.content || '' })
+
+    if (!upstream.ok) {
+      const err = await upstream.json()
+      return res.status(502).json({ error: err.error?.message || 'upstream error' })
+    }
+
+    res.setHeader('Content-Type', 'text/event-stream')
+    res.setHeader('Cache-Control', 'no-cache')
+    res.setHeader('Connection', 'keep-alive')
+
+    let closed = false
+    res.on('close', () => { closed = true })
+
+    const reader = upstream.body.getReader()
+    const dec = new TextDecoder()
+    let buf = ''
+
+    while (!closed) {
+      const { value, done } = await reader.read()
+      if (done) break
+      buf += dec.decode(value, { stream: true })
+      const lines = buf.split('\n')
+      buf = lines.pop()
+
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue
+        const data = line.slice(6)
+        if (data === '[DONE]') { res.write('data: [DONE]\n\n'); res.end(); return }
+        try {
+          const parsed = JSON.parse(data)
+          const text = parsed.choices?.[0]?.delta?.content
+          if (text) res.write(`data: ${JSON.stringify({ text })}\n\n`)
+        } catch {}
+      }
+    }
+
+    res.write('data: [DONE]\n\n')
+    res.end()
   } catch (e) {
-    res.status(502).json({ error: e.message })
+    if (!res.headersSent) res.status(502).json({ error: e.message })
+    else { res.write(`data: ${JSON.stringify({ error: e.message })}\n\n`); res.end() }
   }
 })
 

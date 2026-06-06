@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { SAMPLE } from "./data/samples.js";
 
 const ROUTES = ["R1_FNB", "R2_DUBAI", "R3_SANGHUANG"];
 const RM = {
@@ -8,54 +9,16 @@ const RM = {
 };
 const DAYS_ZH = ["週一","週二","週三","週四","週五","週六","週日"];
 
-const SAMPLE = {
-  R1_FNB: `【🤖 AI & TECH TODAY】
-• OpenAI 發布語音模式更新，支援即時翻譯——對台灣 F&B 品牌進入中東市場有直接應用價值
-• Superhuman AI：餐飲 POS 系統整合 AI 預測庫存，減少 30% 食材浪費案例報告
-• 1440 頭條：中東食品科技投資 Q1 2026 達 2.3 億美元，YoY +45%
-
-【🍜 F&B MARKET INTEL】
-• Dubai 健康餐飲品牌「Kcal」宣布擴展至沙烏地，顯示海灣健康餐飲需求持續升溫
-• 台灣功能性食品出口 Q1 成長 18%，東南亞與中東為主要目標市場
-• 植物性蛋白在 UAE Halal 認證取得突破，品牌進入門檻降低
-
-【⚡ TODAY'S ACTION ITEM】
-研究 Kcal 的 Dubai 擴張策略，作為台灣品牌進入 UAE 的參考案例`,
-
-  R2_DUBAI: `【🏛️ 法規動態週報】
-HIGH PRIORITY：無重大緊急變動
-
-MEDIUM PRIORITY：
-• IFZA 2026 Q2 費用調整預告，建議本季完成公司設立手續
-• UAE 企業稅（9%）適用範圍擴大討論中，Free Zone 豁免條件可能調整
-
-F&B SPECIFIC：
-• Dubai Municipality 強化 Halal 認證審查，申請時間延長至 8-12 週
-
-TAX & CORPORATE：
-• 企業稅申報系統（EmaraTax）更新，需確認申報格式
-
-【📌 RECOMMENDED ACTION】
-本週確認 IFZA 公司設立所需文件清單，把握費用調整前的視窗期`,
-
-  R3_SANGHUANG: `【🍄 桑黃市場日報】
-📊 市場聲量：中等活躍（近期研究論文 3 篇發布）
-
-🔬 科研動態：
-• 台大醫院發布桑黃多醣體免疫調節研究，在國際期刊刊登，可作為品牌科學背書素材
-
-🛒 競品動態：
-• 日本 Hokkaido 桑黃品牌進入台灣市場，定價策略偏高端（NT$3,800/月份量）
-• 中國電商平台桑黃產品聲量下降，品質爭議導致消費者轉向台灣產品
-
-💰 定價觀察：
-• 高端桑黃膠囊：NT$2,800–4,500 / 月份量（台灣市場）
-• Dubai 健康保健品溢價空間：+40–60% vs 台灣定價
-
-🎯 高端市場機會：
-科學背書 + 台灣產地認證 + Dubai 健康消費升級 = 三重定位優勢`,
+const C = {
+  bg:"#09090C", surf:"#0F0F12", surf2:"#141418",
+  border:"#1E1E24", borderHi:"#2E2E38",
+  gold:"#E8A838", goldDim:"#8A6020", goldBg:"#1C1A0A",
+  blue:"#60A5FA", green:"#6EE7B7",
+  text:"#E0D8CC", textDim:"#7A7880", textMuted:"#3E3C44",
+  danger:"#F87171",
 };
 
+// ── Utility ───────────────────────────────────────────────────────────────────
 function getWeekKey(offset = 0) {
   const base = new Date();
   const day = base.getDay();
@@ -75,20 +38,65 @@ function getWeekRange(offset) {
   return `${mon.getMonth()+1}/${mon.getDate()} – ${sun.getMonth()+1}/${sun.getDate()}`;
 }
 function getTodayIdx() { const d = new Date().getDay(); return d === 0 ? 6 : d - 1; }
-const EMPTY_WEEK = () => Array.from({length:7}, (_, i) => ({dayIndex: i, entries: {R1_FNB:"", R2_DUBAI:"", R3_SANGHUANG:""}}));
+const EMPTY_WEEK = () => Array.from({length:7}, (_, i) => ({dayIndex:i, entries:{R1_FNB:"",R2_DUBAI:"",R3_SANGHUANG:""}}));
 
-// FIX 1: replaced window.storage (Claude artifact API) with localStorage
 function sSet(k, v) { try { localStorage.setItem(k, v); return true; } catch(e) { return false; } }
 function sGet(k)    { try { return localStorage.getItem(k); } catch(e) { return null; } }
 
-const C = {
-  bg:"#09090C", surf:"#0F0F12", surf2:"#141418",
-  border:"#1E1E24", borderHi:"#2E2E38",
-  gold:"#E8A838", goldDim:"#8A6020", goldBg:"#1C1A0A",
-  blue:"#60A5FA", green:"#6EE7B7",
-  text:"#E0D8CC", textDim:"#7A7880", textMuted:"#3E3C44",
-};
+// ── Markdown renderer ─────────────────────────────────────────────────────────
+function renderInline(text) {
+  const parts = text.split(/(\*\*[^*]+\*\*)/g);
+  return parts.map((p, i) => {
+    if (p.startsWith("**") && p.endsWith("**") && p.length > 4)
+      return <strong key={i} style={{color:C.gold}}>{p.slice(2,-2)}</strong>;
+    return p;
+  });
+}
 
+function MarkdownOutput({ text, streaming }) {
+  if (!text) return null;
+  const lines = text.split("\n");
+  return (
+    <div style={{fontSize:13, lineHeight:2, color:"#D4C9B4", fontFamily:"'Georgia',serif"}}>
+      {lines.map((line, i) => {
+        const isLast = i === lines.length - 1;
+        const cursor = isLast && streaming
+          ? <span style={{opacity:.6, animation:"blink .7s step-end infinite"}}>▌</span>
+          : null;
+
+        if (line.startsWith("## "))
+          return <div key={i} style={{fontSize:14,fontWeight:700,color:C.gold,marginTop:18,marginBottom:4}}>
+            {renderInline(line.slice(3))}{cursor}
+          </div>;
+        if (line.startsWith("# "))
+          return <div key={i} style={{fontSize:15,fontWeight:700,color:C.gold,marginTop:20,marginBottom:6}}>
+            {renderInline(line.slice(2))}{cursor}
+          </div>;
+        if (/^[-*] /.test(line))
+          return <div key={i} style={{display:"flex",gap:8,marginTop:2,paddingLeft:4}}>
+            <span style={{color:C.goldDim,flexShrink:0}}>•</span>
+            <span>{renderInline(line.slice(2))}{cursor}</span>
+          </div>;
+        if (!line.trim())
+          return <div key={i} style={{height:10}} />;
+        return <div key={i}>{renderInline(line)}{cursor}</div>;
+      })}
+    </div>
+  );
+}
+
+// ── Button helper ─────────────────────────────────────────────────────────────
+const btn = (primary, extra = {}) => ({
+  padding:"9px 20px", borderRadius:8,
+  border: primary ? "none" : `1px solid ${C.border}`,
+  background: primary ? C.gold : C.surf2,
+  color: primary ? "#09090C" : C.textDim,
+  cursor:"pointer", fontSize:12, fontWeight: primary ? 700 : 400,
+  fontFamily:"inherit", letterSpacing:"0.04em", transition:"all 0.13s",
+  ...extra,
+});
+
+// ── App ───────────────────────────────────────────────────────────────────────
 export default function App() {
   const [weekOffset, setWeekOffset] = useState(0);
   const [weekData, setWeekData]     = useState(EMPTY_WEEK());
@@ -100,7 +108,10 @@ export default function App() {
   const [tab, setTab]               = useState("log");
   const [saveState, setSaveState]   = useState("idle");
   const [loaded, setLoaded]         = useState(false);
-  const timer = useRef(null);
+  const [copyState, setCopyState]   = useState("idle");   // idle | copied
+  const [clearPending, setClearPending] = useState(false); // review clear confirm
+  const timer      = useRef(null);
+  const abortRef   = useRef(null);
   const wk = getWeekKey(weekOffset);
 
   // Load from storage
@@ -113,39 +124,42 @@ export default function App() {
     setLoaded(true);
   }, [wk]);
 
-  // Sync textarea
+  // Sync textarea when day/route/weekData changes
   useEffect(() => { setText(weekData[day]?.entries?.[route] || ""); }, [day, route, weekData]);
 
-  // Auto-save — FIX 2: spread operators were unicode ellipsis (…) not (...)
+  // Auto-save — D2 fix: no "saving" flicker during debounce; silent until write completes
   useEffect(() => {
     if (!loaded) return;
-    setSaveState("saving");
     clearTimeout(timer.current);
     timer.current = setTimeout(() => {
-      const nd = weekData.map((d, i) => i === day ? {...d, entries: {...d.entries, [route]: text}} : d);
+      const nd = weekData.map((d, i) => i === day ? {...d, entries:{...d.entries,[route]:text}} : d);
       const ok = sSet(`j:${wk}`, JSON.stringify(nd));
-      if (ok) { setWeekData(nd); setSaveState("saved"); setTimeout(() => setSaveState("idle"), 2000); }
-      else setSaveState("error");
+      if (ok) {
+        setWeekData(nd);
+        setSaveState("saved");
+        setTimeout(() => setSaveState("idle"), 2000);
+      } else {
+        setSaveState("error");
+      }
     }, 700);
     return () => clearTimeout(timer.current);
   }, [text]);
 
-  const filled = weekData.reduce((a, d) => a + ROUTES.filter(r => d.entries[r]?.trim()).length, 0);
+  const filled    = weekData.reduce((a, d) => a + ROUTES.filter(r => d.entries[r]?.trim()).length, 0);
   const dayFilled = i => ROUTES.filter(r => weekData[i]?.entries?.[r]?.trim()).length;
-  const todayIdx = getTodayIdx();
+  const todayIdx  = getTodayIdx();
 
   const loadSample = () => setText(SAMPLE[route] || "");
 
+  // ── A1: Streaming review ───────────────────────────────────────────────────
   const doReview = async () => {
-    // Truncate each entry to 600 chars to stay within Groq free tier 12k TPM limit
     const ENTRY_LIMIT = 600;
     const content = weekData.map((d, i) => {
       const f = ROUTES.filter(r => d.entries[r]?.trim());
       if (!f.length) return null;
       return `=== ${DAYS_ZH[i]} ===\n` + f.map(r => {
-        const text = d.entries[r];
-        const truncated = text.length > ENTRY_LIMIT ? text.slice(0, ENTRY_LIMIT) + "…" : text;
-        return `[${RM[r].full}]\n${truncated}`;
+        const t = d.entries[r];
+        return `[${RM[r].full}]\n${t.length > ENTRY_LIMIT ? t.slice(0, ENTRY_LIMIT) + "…" : t}`;
       }).join("\n\n");
     }).filter(Boolean).join("\n\n—\n\n");
 
@@ -156,31 +170,67 @@ export default function App() {
 
     setRevLoading(true);
     setReview("");
+    setClearPending(false);
+
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
+
     try {
       const resp = await fetch("/api/review", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
         body: JSON.stringify({ content, weekKey: wk }),
+        signal: ctrl.signal,
       });
-      const data = await resp.json();
-      if (data.error) throw new Error(data.error);
-      setReview(data.text || "生成失敗，請重試。");
-      sSet(`r:${wk}`, data.text);
+
+      if (!resp.ok) {
+        const err = await resp.json();
+        throw new Error(err.error || "Server error");
+      }
+
+      const reader = resp.body.getReader();
+      const dec = new TextDecoder();
+      let buf = "", full = "";
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        const lines = buf.split("\n");
+        buf = lines.pop();
+
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          const data = line.slice(6);
+          if (data === "[DONE]") { sSet(`r:${wk}`, full); setRevLoading(false); return; }
+          try {
+            const parsed = JSON.parse(data);
+            if (parsed.error) throw new Error(parsed.error);
+            if (parsed.text) { full += parsed.text; setReview(full); }
+          } catch(e) { if (e.name !== "SyntaxError") throw e; }
+        }
+      }
+      sSet(`r:${wk}`, full);
     } catch(e) {
-      setReview(`❌ 連線錯誤：${e.message}`);
+      if (e.name !== "AbortError") setReview(`❌ 連線錯誤：${e.message}`);
     }
     setRevLoading(false);
   };
 
-  // FIX 2 (continued): spread operator in btn helper
-  const btn = (primary, extra = {}) => ({
-    padding: "9px 20px", borderRadius: 8, border: primary ? "none" : `1px solid ${C.border}`,
-    background: primary ? C.gold : C.surf2, color: primary ? "#09090C" : C.textDim,
-    cursor: "pointer", fontSize: 12, fontWeight: primary ? 700 : 400,
-    fontFamily: "inherit", letterSpacing: "0.04em", transition: "all 0.13s", ...extra
-  });
+  const stopReview = () => { abortRef.current?.abort(); setRevLoading(false); };
 
-  const TABS = [["log","📝 每日輸入"], ["week","📊 週覽"], ["review","🎯 週六複盤"]];
+  const copyReview = () => {
+    navigator.clipboard.writeText(review)
+      .then(() => { setCopyState("copied"); setTimeout(() => setCopyState("idle"), 2000); })
+      .catch(() => {});
+  };
+
+  const clearReview = () => {
+    if (!clearPending) { setClearPending(true); return; }
+    setReview(""); sSet(`r:${wk}`, ""); setClearPending(false);
+  };
+
+  const TABS = [["log","📝 每日輸入"],["week","📊 週覽"],["review","🎯 週六複盤"]];
 
   return (
     <div style={{minHeight:"100vh", background:C.bg, color:C.text, fontFamily:"'Georgia','Times New Roman',serif"}}>
@@ -204,7 +254,7 @@ export default function App() {
               style={btn(false, {padding:"5px 11px", fontSize:12, opacity:weekOffset>=0?0.3:1})}>›</button>
           </div>
           <div style={{display:"flex", gap:14}}>
-            {[{v:filled, l:"記錄", c:C.gold}, {v:`${Math.round(filled/21*100)}%`, l:"完成率", c:C.blue}].map(({v, l, c}) => (
+            {[{v:filled, l:"記錄", c:C.gold},{v:`${Math.round(filled/21*100)}%`, l:"完成率", c:C.blue}].map(({v,l,c}) => (
               <div key={l} style={{textAlign:"center"}}>
                 <div style={{fontSize:17, color:c, fontWeight:600}}>{v}</div>
                 <div style={{fontSize:8, color:C.textDim, letterSpacing:"0.1em"}}>{l}</div>
@@ -213,11 +263,11 @@ export default function App() {
           </div>
         </div>
         <div style={{display:"flex", gap:3}}>
-          {TABS.map(([v, l]) => (
+          {TABS.map(([v,l]) => (
             <button key={v} onClick={() => setTab(v)} style={{
               padding:"6px 14px", borderRadius:6, border:"none", cursor:"pointer", fontFamily:"inherit",
               background:tab===v?C.gold:"transparent", color:tab===v?"#09090C":C.textDim,
-              fontSize:11, fontWeight:tab===v?700:400, letterSpacing:"0.04em", transition:"all 0.13s"
+              fontSize:11, fontWeight:tab===v?700:400, letterSpacing:"0.04em", transition:"all 0.13s",
             }}>{l}</button>
           ))}
         </div>
@@ -245,7 +295,7 @@ export default function App() {
             </div>
           )}
 
-          {/* Day pills */}
+          {/* Day pills — L1: today more prominent */}
           <div style={{marginBottom:14}}>
             <div style={{fontSize:9, color:C.textDim, letterSpacing:"0.18em", marginBottom:7}}>選擇日期</div>
             <div style={{display:"flex", gap:5, flexWrap:"wrap"}}>
@@ -254,18 +304,17 @@ export default function App() {
                 return (
                   <button key={i} onClick={() => setDay(i)} style={{
                     padding:"7px 11px", borderRadius:8, fontFamily:"inherit",
-                    border:`1px solid ${sel?C.gold:c>0?C.borderHi:C.border}`,
-                    background:sel?"#1C1A0A":"transparent",
-                    color:sel?C.gold:c>0?"#C8B070":C.textMuted,
+                    border:`1px solid ${sel ? C.gold : today ? C.gold+"60" : c>0 ? C.borderHi : C.border}`,
+                    background: sel ? "#1C1A0A" : today ? "#1C1A0A80" : "transparent",
+                    color: sel ? C.gold : today ? C.gold+"CC" : c>0 ? "#C8B070" : C.textMuted,
                     cursor:"pointer", fontSize:12, minWidth:50, textAlign:"center",
-                    position:"relative", transition:"all 0.12s"
+                    position:"relative", transition:"all 0.12s",
+                    boxShadow: today && !sel ? `0 0 0 1px ${C.gold}30` : "none",
                   }}>
-                    <div>{d}</div>
+                    <div style={{fontWeight: today ? 600 : 400}}>{d}</div>
                     <div style={{fontSize:8, marginTop:1, color:sel?C.goldDim:c>0?"#6A5820":C.textMuted}}>
-                      {c>0?`${c}/3✓`:today?"今天":"—"}
+                      {c>0 ? `${c}/3✓` : today ? "今天" : "—"}
                     </div>
-                    {today && <div style={{position:"absolute", top:3, right:3, width:4, height:4,
-                      borderRadius:"50%", background:C.gold}}/>}
                   </button>
                 );
               })}
@@ -284,12 +333,10 @@ export default function App() {
                     border:`1px solid ${sel?m.color:has?C.borderHi:C.border}`,
                     background:sel?`${m.color}14`:"transparent",
                     color:sel?m.color:has?"#9A9080":C.textDim,
-                    cursor:"pointer", fontSize:12, transition:"all 0.12s"
+                    cursor:"pointer", fontSize:12, transition:"all 0.12s",
                   }}>
                     <span style={{fontWeight:sel?600:400}}>{m.icon} {m.label}</span>
-                    <span style={{fontSize:9, marginLeft:6, color:has?C.goldDim:C.textMuted}}>
-                      {has?"✓":""}
-                    </span>
+                    {has && <span style={{fontSize:9, marginLeft:6, color:C.goldDim}}>✓</span>}
                   </button>
                 );
               })}
@@ -297,38 +344,40 @@ export default function App() {
           </div>
 
           {/* Editor */}
-          <div style={{background:C.surf, borderRadius:12,
-            border:`1px solid ${RM[route].color}28`, padding:16}}>
-            <div style={{display:"flex", justifyContent:"space-between",
-              alignItems:"center", marginBottom:10}}>
+          <div style={{background:C.surf, borderRadius:12, border:`1px solid ${RM[route].color}28`, padding:16}}>
+            <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10}}>
               <div style={{fontSize:9, color:RM[route].color, letterSpacing:"0.15em", textTransform:"uppercase"}}>
                 {DAYS_ZH[day]} · {RM[route].full}
               </div>
               <div style={{display:"flex", gap:8, alignItems:"center"}}>
+                {/* L2: clear entry button */}
+                {text && (
+                  <button onClick={() => setText("")}
+                    style={btn(false, {padding:"3px 10px", fontSize:10, color:C.danger, borderColor:C.danger+"40"})}>
+                    🗑 清除
+                  </button>
+                )}
                 <button onClick={loadSample} style={btn(false, {padding:"3px 10px", fontSize:10})}>📋 載入範例</button>
                 <div style={{fontSize:9, color:
-                  saveState==="saved"?"#6EE7B7":saveState==="saving"?C.goldDim:
-                  saveState==="error"?"#F87171":C.textMuted}}>
-                  {saveState==="saved"?"✓ 已儲存":saveState==="saving"?"儲存中…":
-                   saveState==="error"?"⚠ 儲存失敗":""}
+                  saveState==="saved" ? "#6EE7B7" : saveState==="error" ? C.danger : C.textMuted}}>
+                  {saveState==="saved" ? "✓ 已儲存" : saveState==="error" ? "⚠ 儲存失敗" : ""}
                 </div>
               </div>
             </div>
-            <div style={{fontSize:9, color:C.textMuted, marginBottom:8, lineHeight:1.6}}>
-              💡 {RM[route].hint}
-            </div>
             <textarea value={text} onChange={e => setText(e.target.value)}
-              placeholder={`貼上「${RM[route].label}」Routine 的輸出內容…\n\n沒有 Routine 輸出？點擊右上「載入範例」體驗功能`}
+              placeholder={`貼上「${RM[route].label}」Routine 的輸出內容…\n\n${RM[route].hint}`}
               style={{
                 width:"100%", minHeight:220, background:"transparent",
                 border:`1px solid ${C.border}`, borderRadius:8, outline:"none",
                 color:"#D4C8B4", fontSize:12, lineHeight:1.85, resize:"vertical",
                 fontFamily:"'Georgia',serif", padding:12, boxSizing:"border-box",
               }}/>
-            <div style={{display:"flex", justifyContent:"space-between",
-              marginTop:6, fontSize:9, color:C.textMuted}}>
-              <span>{text.length} 字元</span>
-              <span>自動儲存 · Auto-saved to browser</span>
+            {/* L5: character count with limit guidance */}
+            <div style={{display:"flex", justifyContent:"space-between", marginTop:6, fontSize:9}}>
+              <span style={{color: text.length > 600 ? C.danger : C.textMuted}}>
+                {text.length} 字元{text.length > 600 ? " · 超過 600 建議上限，AI 分析將截短" : " · 建議 600 字以內"}
+              </span>
+              <span style={{color:C.textMuted}}>自動儲存 · Auto-saved to browser</span>
             </div>
           </div>
         </div>
@@ -340,25 +389,36 @@ export default function App() {
           <div style={{fontSize:9, color:C.textDim, letterSpacing:"0.15em", marginBottom:14}}>
             {wk} · {filled}/21 ENTRIES LOGGED
           </div>
+
+          {/* W3: thicker progress bars (8px) */}
           <div style={{display:"flex", gap:8, marginBottom:18, flexWrap:"wrap"}}>
             {ROUTES.map(r => {
-              const m = RM[r], cnt = weekData.filter(d => d.entries[r]?.trim()).length;
-              const tot = m.freq==="weekly"?1:7, pct = Math.round(cnt/tot*100);
+              const m = RM[r];
+              const cnt = m.freq==="weekly"
+                ? (weekData.some(d => d.entries[r]?.trim()) ? 1 : 0)
+                : weekData.filter(d => d.entries[r]?.trim()).length;
+              const tot = m.freq==="weekly" ? 1 : 7;
+              const pct = Math.round(cnt/tot*100);
               return (
                 <div key={r} style={{flex:"1 1 160px", background:C.surf,
                   border:`1px solid ${C.border}`, borderRadius:10, padding:12}}>
-                  <div style={{fontSize:10, color:m.color, marginBottom:7}}>{m.icon} {m.label}</div>
+                  <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8}}>
+                    <div style={{fontSize:10, color:m.color}}>{m.icon} {m.label}</div>
+                    {m.freq==="weekly" && <div style={{fontSize:8, color:C.textDim, border:`1px solid ${C.border}`, borderRadius:4, padding:"1px 5px"}}>週報</div>}
+                  </div>
                   <div style={{display:"flex", gap:8, alignItems:"center"}}>
-                    <div style={{flex:1, height:5, background:C.border, borderRadius:3}}>
+                    <div style={{flex:1, height:8, background:C.border, borderRadius:4}}>
                       <div style={{width:`${pct}%`, height:"100%", background:m.color,
-                        borderRadius:3, transition:"width 0.4s"}}/>
+                        borderRadius:4, transition:"width 0.4s"}}/>
                     </div>
-                    <span style={{fontSize:10, color:C.textDim}}>{cnt}/{tot}</span>
+                    <span style={{fontSize:10, color:C.textDim, minWidth:28}}>{cnt}/{tot}</span>
                   </div>
                 </div>
               );
             })}
           </div>
+
+          {/* W1: Dubai weekly — full-width single cell */}
           <div style={{overflowX:"auto"}}>
             <div style={{display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:5, minWidth:560}}>
               {DAYS_ZH.map((d, i) => {
@@ -373,16 +433,32 @@ export default function App() {
                       {d}{today && <span style={{fontSize:7, marginLeft:4, color:C.gold}}>今</span>}
                     </div>
                     {ROUTES.map(r => {
-                      const m = RM[r], t = weekData[i]?.entries?.[r]?.trim();
+                      const m = RM[r];
+                      const t = weekData[i]?.entries?.[r]?.trim();
+                      // W1: Dubai weekly — show single indicator only on first entry day
+                      if (m.freq==="weekly") {
+                        const dubaiFilled = weekData.some(d => d.entries[r]?.trim());
+                        const isFirst = i === weekData.findIndex(d => d.entries[r]?.trim());
+                        if (dubaiFilled && isFirst) return (
+                          <div key={r} style={{marginBottom:5}}>
+                            <div style={{fontSize:8, color:m.color}}>● {m.icon} <span style={{color:C.textDim}}>週報</span></div>
+                          </div>
+                        );
+                        if (dubaiFilled) return null;
+                        if (i===0) return (
+                          <div key={r} style={{marginBottom:5}}>
+                            <div style={{fontSize:8, color:C.border}}>— {m.icon} <span style={{color:C.textMuted}}>週報</span></div>
+                          </div>
+                        );
+                        return null;
+                      }
                       return (
                         <div key={r} style={{marginBottom:5}}>
-                          <div style={{fontSize:8, color:t?m.color:C.border}}>
-                            {t?"●":"○"} {m.icon}
-                          </div>
+                          <div style={{fontSize:8, color:t?m.color:C.border}}>{t?"●":"○"} {m.icon}</div>
                           {t && <div style={{fontSize:8, color:C.textDim, lineHeight:1.4,
                             overflow:"hidden", display:"-webkit-box",
                             WebkitLineClamp:2, WebkitBoxOrient:"vertical"}}>
-                            {t.substring(0, 55)}
+                            {t.substring(0,55)}
                           </div>}
                         </div>
                       );
@@ -406,52 +482,75 @@ export default function App() {
             <div style={{fontSize:9, color:C.gold, letterSpacing:"0.2em", marginBottom:5}}>週六複盤 · SATURDAY OPTIMIZATION REVIEW</div>
             <div style={{fontSize:12, color:"#B8B098", lineHeight:1.8, marginBottom:14}}>
               AI 交叉分析本週 <b style={{color:C.gold}}>{filled}</b>/21 份報告，找出趨勢信號、盲點警告、下週 One Thing。
-              {filled<3 && <div style={{color:"#F87171", marginTop:5, fontSize:11}}>
-                ⚠️ 建議至少 3 份報告再分析（目前 {filled} 份）。
-                可至「每日輸入」用「載入範例」填充測試資料。
-              </div>}
+              {filled<3 && (
+                <div style={{color:C.danger, marginTop:5, fontSize:11}}>
+                  ⚠️ 建議至少 3 份報告再分析（目前 {filled} 份）。可至「每日輸入」用「載入範例」填充測試資料。
+                </div>
+              )}
             </div>
-            <div style={{display:"flex", gap:8, flexWrap:"wrap"}}>
-              <button onClick={doReview} disabled={revLoading}
-                style={btn(true, {opacity:revLoading?0.6:1})}>
-                {revLoading?"🔄 AI 分析中…":"🎯 生成本週趨勢信號分析"}
-              </button>
-              {review && <button onClick={() => setReview("")}
-                style={btn(false, {fontSize:11, padding:"9px 14px"})}>🗑 清除</button>}
-              {review && <button onClick={() => {
-                try { navigator.clipboard.writeText(review); } catch(e) {}
-              }} style={btn(false, {fontSize:11, padding:"9px 14px"})}>📋 複製</button>}
+            <div style={{display:"flex", gap:8, flexWrap:"wrap", alignItems:"center"}}>
+              {/* A1: streaming — show Stop button during loading */}
+              {revLoading ? (
+                <button onClick={stopReview} style={btn(false, {color:C.danger, borderColor:C.danger+"60"})}>
+                  ⏹ 停止
+                </button>
+              ) : (
+                <button onClick={doReview} style={btn(true)}>
+                  🎯 生成本週趨勢信號分析
+                </button>
+              )}
+              {review && !revLoading && (
+                <>
+                  {/* R3: clear with confirmation */}
+                  <button onClick={clearReview}
+                    style={btn(false, {fontSize:11, padding:"9px 14px",
+                      color: clearPending ? C.danger : C.textDim,
+                      borderColor: clearPending ? C.danger+"60" : C.border})}>
+                    {clearPending ? "確認清除？" : "🗑 清除"}
+                  </button>
+                  {clearPending && (
+                    <button onClick={() => setClearPending(false)}
+                      style={btn(false, {fontSize:11, padding:"9px 14px"})}>取消</button>
+                  )}
+                  {/* R1: copy with success feedback */}
+                  <button onClick={copyReview}
+                    style={btn(false, {fontSize:11, padding:"9px 14px",
+                      color: copyState==="copied" ? C.green : C.textDim,
+                      borderColor: copyState==="copied" ? C.green+"60" : C.border})}>
+                    {copyState==="copied" ? "✓ 已複製" : "📋 複製"}
+                  </button>
+                </>
+              )}
             </div>
           </div>
 
-          {revLoading && (
+          {/* A1: streaming loading indicator */}
+          {revLoading && !review && (
             <div style={{background:C.surf, borderRadius:12, padding:28,
               border:`1px solid ${C.border}`, textAlign:"center"}}>
               <div style={{color:C.goldDim, marginBottom:10, fontSize:13}}>
                 🔄 正在交叉分析 {filled} 份報告…
               </div>
               <div style={{color:C.textMuted, fontSize:11, marginBottom:16}}>
-                AI 正在找出跨 Routine 的趨勢關聯，約需 10–20 秒
+                AI 正在找出跨 Routine 的趨勢關聯
               </div>
               <div style={{display:"flex", justifyContent:"center", gap:5}}>
                 {[0,1,2].map(i => (
-                  <div key={i} style={{width:7, height:7, borderRadius:"50%",
-                    background:C.gold, animation:`bounce 1.2s ease-in-out ${i*0.2}s infinite`}}/>
+                  <div key={i} style={{width:7,height:7,borderRadius:"50%",background:C.gold,
+                    animation:`bounce 1.2s ease-in-out ${i*0.2}s infinite`}}/>
                 ))}
               </div>
             </div>
           )}
 
-          {!revLoading && review && (
+          {/* A2: markdown rendering; streaming shows cursor */}
+          {review && (
             <div style={{background:C.surf, border:`1px solid ${C.border}`, borderRadius:12, padding:22}}>
               <div style={{fontSize:9, color:C.textDim, letterSpacing:"0.15em",
                 marginBottom:14, paddingBottom:12, borderBottom:`1px solid ${C.border}`}}>
-                {wk} · AI ANALYSIS · 已自動儲存
+                {wk} · AI ANALYSIS{!revLoading && " · 已自動儲存"}
               </div>
-              <div style={{fontSize:13, lineHeight:2, color:"#D4C9B4",
-                whiteSpace:"pre-wrap", fontFamily:"'Georgia',serif"}}>
-                {review}
-              </div>
+              <MarkdownOutput text={review} streaming={revLoading} />
             </div>
           )}
 
@@ -476,6 +575,7 @@ export default function App() {
 
       <style>{`
         @keyframes bounce{0%,100%{transform:translateY(0);opacity:.4}50%{transform:translateY(-6px);opacity:1}}
+        @keyframes blink{0%,100%{opacity:1}50%{opacity:0}}
         textarea::placeholder{color:#3A3844;font-family:'Georgia',serif;font-size:12px}
         button:hover:not(:disabled){opacity:.8}
         ::-webkit-scrollbar{width:4px;height:4px}
