@@ -220,9 +220,18 @@ export default function App() {
   const stopReview = () => { abortRef.current?.abort(); setRevLoading(false); };
 
   const copyReview = () => {
-    navigator.clipboard.writeText(review)
-      .then(() => { setCopyState("copied"); setTimeout(() => setCopyState("idle"), 2000); })
-      .catch(() => {});
+    const done = () => { setCopyState("copied"); setTimeout(() => setCopyState("idle"), 2000); };
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(review).then(done).catch(() => {
+        const el = document.createElement("textarea");
+        el.value = review; document.body.appendChild(el); el.select();
+        document.execCommand("copy"); document.body.removeChild(el); done();
+      });
+    } else {
+      const el = document.createElement("textarea");
+      el.value = review; document.body.appendChild(el); el.select();
+      document.execCommand("copy"); document.body.removeChild(el); done();
+    }
   };
 
   const clearReview = () => {
