@@ -114,8 +114,11 @@ export default function App() {
   const abortRef   = useRef(null);
   const wk = getWeekKey(weekOffset);
 
-  // Load from storage
+  // Load from storage — also abort any in-flight review and reset transient state
   useEffect(() => {
+    abortRef.current?.abort();
+    setRevLoading(false);
+    setClearPending(false);
     setLoaded(false);
     const jRaw = sGet(`j:${wk}`);
     const rRaw = sGet(`r:${wk}`);
@@ -578,7 +581,7 @@ export default function App() {
 
       <div style={{borderTop:`1px solid ${C.border}`, padding:"12px 18px",
         display:"flex", justifyContent:"space-between", fontSize:9, color:C.textMuted, marginTop:20}}>
-        <span>Boss Tung · Intelligence Decision Journal · {getWeekKey(0)}</span>
+        <span>Boss Tung · Intelligence Decision Journal · {wk}</span>
         <span style={{color:C.goldDim}}>↺ Sat 09:00 Weekly Review</span>
       </div>
 
