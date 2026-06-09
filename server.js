@@ -21,13 +21,16 @@ function rateLimit(req, res, next) {
   next()
 }
 
+// Providers tried in order; first successful response streams to client
+const REVIEW_PROVIDERS = [
+  { name: 'Groq',     url: 'https://api.groq.com/openai/v1/chat/completions',     key: () => process.env.GROQ_API_KEY,     model: 'meta-llama/llama-4-scout-17b-16e-instruct' },
+  { name: 'Cerebras', url: 'https://api.cerebras.ai/v1/chat/completions',          key: () => process.env.CEREBRAS_API_KEY, model: 'gpt-oss-120b' },
+]
+
 // ── /api/review — SSE streaming ───────────────────────────────────────────────
 app.post('/api/review', rateLimit, async (req, res) => {
   const { content, weekKey } = req.body
   if (!content?.trim()) return res.status(400).json({ error: 'no content' })
-
-  const apiKey = process.env.GROQ_API_KEY
-  if (!apiKey) return res.status(500).json({ error: 'GROQ_API_KEY not set on server' })
 
   const prompt =
 `你是 Boss Tung 的人生合夥人。以下是本週（${weekKey || ''}）三個情報 Routine 的報告。
@@ -73,22 +76,21 @@ ${content}
 [動詞 + 具體目標 + 截止時間]`
 
   try {
-    const upstream = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-      body: JSON.stringify({
-        model: 'meta-llama/llama-4-scout-17b-16e-instruct',
-        max_tokens: 1200,
-        temperature: 0.7,
-        stream: true,
-        messages: [{ role: 'user', content: prompt }],
-      }),
-    })
-
-    if (!upstream.ok) {
-      const err = await upstream.json()
-      return res.status(502).json({ error: err.error?.message || 'upstream error' })
+    let upstream, providerName
+    for (const p of REVIEW_PROVIDERS) {
+      if (!p.key()) continue
+      try {
+        const r = await fetch(p.url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${p.key()}` },
+          body: JSON.stringify({ model: p.model, max_tokens: 1200, temperature: 0.7, stream: true, messages: [{ role: 'user', content: prompt }] }),
+        })
+        if (r.ok) { upstream = r; providerName = p.name; break }
+      } catch { /* try next */ }
     }
+
+    if (!upstream) return res.status(502).json({ error: 'All AI providers unavailable' })
+    console.log(`[review] streaming via ${providerName}`)
 
     res.setHeader('Content-Type', 'text/event-stream')
     res.setHeader('Cache-Control', 'no-cache')
