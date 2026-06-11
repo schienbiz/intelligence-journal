@@ -9,8 +9,16 @@ app.use(express.static(path.join(__dirname, 'dist')))
 
 app.get('/health', (_, res) => res.json({ ok: true }))
 
-// ── Simple per-IP rate limit: max 8 reviews per minute ────────────────────────
+// ── Per-IP rate limit: max 8 reviews/min; cleanup every hour ─────────────────
 const rateMap = new Map()
+setInterval(() => {
+  const cutoff = Date.now() - 60_000
+  for (const [ip, times] of rateMap) {
+    const fresh = times.filter(t => t > cutoff)
+    fresh.length ? rateMap.set(ip, fresh) : rateMap.delete(ip)
+  }
+}, 60 * 60 * 1000)
+
 function rateLimit(req, res, next) {
   const ip = req.ip || req.socket?.remoteAddress || 'unknown'
   const now = Date.now()
@@ -23,8 +31,9 @@ function rateLimit(req, res, next) {
 
 // Providers tried in order; first successful response streams to client
 const REVIEW_PROVIDERS = [
-  { name: 'Groq',     url: 'https://api.groq.com/openai/v1/chat/completions',     key: () => process.env.GROQ_API_KEY,     model: 'meta-llama/llama-4-scout-17b-16e-instruct' },
-  { name: 'Cerebras', url: 'https://api.cerebras.ai/v1/chat/completions',          key: () => process.env.CEREBRAS_API_KEY, model: 'gpt-oss-120b' },
+  { name: 'Groq',     url: 'https://api.groq.com/openai/v1/chat/completions',          key: () => process.env.GROQ_API_KEY,     model: 'meta-llama/llama-4-scout-17b-16e-instruct' },
+  { name: 'Cerebras', url: 'https://api.cerebras.ai/v1/chat/completions',               key: () => process.env.CEREBRAS_API_KEY, model: 'gpt-oss-120b' },
+  { name: 'NVIDIA',   url: 'https://integrate.api.nvidia.com/v1/chat/completions',      key: () => process.env.NVIDIA_API_KEY,   model: 'meta/llama-3.3-70b-instruct' },
 ]
 
 // ── /api/review — SSE streaming ───────────────────────────────────────────────
@@ -99,31 +108,37 @@ ${content}
     let closed = false
     res.on('close', () => { closed = true })
 
+    // SSE keepalive: prevent proxy/Render from closing idle connection during slow providers
+    const keepAlive = setInterval(() => { if (!closed) res.write(': ping\n\n') }, 15_000)
+
     const reader = upstream.body.getReader()
     const dec = new TextDecoder()
     let buf = ''
 
-    while (!closed) {
-      const { value, done } = await reader.read()
-      if (done) break
-      buf += dec.decode(value, { stream: true })
-      const lines = buf.split('\n')
-      buf = lines.pop()
+    try {
+      while (!closed) {
+        const { value, done } = await reader.read()
+        if (done) break
+        buf += dec.decode(value, { stream: true })
+        const lines = buf.split('\n')
+        buf = lines.pop()
 
-      for (const line of lines) {
-        if (!line.startsWith('data: ')) continue
-        const data = line.slice(6)
-        if (data === '[DONE]') { res.write('data: [DONE]\n\n'); res.end(); return }
-        try {
-          const parsed = JSON.parse(data)
-          const text = parsed.choices?.[0]?.delta?.content
-          if (text) res.write(`data: ${JSON.stringify({ text })}\n\n`)
-        } catch {}
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue
+          const data = line.slice(6)
+          if (data === '[DONE]') { res.write('data: [DONE]\n\n'); res.end(); return }
+          try {
+            const parsed = JSON.parse(data)
+            const text = parsed.choices?.[0]?.delta?.content
+            if (text) res.write(`data: ${JSON.stringify({ text })}\n\n`)
+          } catch {}
+        }
       }
+      res.write('data: [DONE]\n\n')
+      res.end()
+    } finally {
+      clearInterval(keepAlive)
     }
-
-    res.write('data: [DONE]\n\n')
-    res.end()
   } catch (e) {
     if (!res.headersSent) res.status(502).json({ error: e.message })
     else { res.write(`data: ${JSON.stringify({ error: e.message })}\n\n`); res.end() }
@@ -134,4 +149,12 @@ ${content}
 app.get('*', (_, res) => res.sendFile(path.join(__dirname, 'dist', 'index.html')))
 
 const PORT = process.env.PORT || 3000
-app.listen(PORT, () => console.log(`[intelligence-journal] port ${PORT}`))
+app.listen(PORT, () => {
+  console.log(`[intelligence-journal] port ${PORT}`)
+  // Self-ping every 14 min to prevent Render free tier spin-down (15-min idle threshold)
+  if (process.env.NODE_ENV === 'production') {
+    const selfUrl = process.env.APP_URL || 'https://intelligence-journal.onrender.com'
+    setInterval(() => fetch(`${selfUrl}/health`).catch(() => {}), 14 * 60 * 1000)
+    console.log('[spindown-guard] active')
+  }
+})
