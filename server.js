@@ -34,6 +34,7 @@ const REVIEW_PROVIDERS = [
   { name: 'Groq',     url: 'https://api.groq.com/openai/v1/chat/completions',          key: () => process.env.GROQ_API_KEY,     model: 'meta-llama/llama-4-scout-17b-16e-instruct' },
   { name: 'Cerebras', url: 'https://api.cerebras.ai/v1/chat/completions',               key: () => process.env.CEREBRAS_API_KEY, model: 'gpt-oss-120b' },
   { name: 'NVIDIA',   url: 'https://integrate.api.nvidia.com/v1/chat/completions',      key: () => process.env.NVIDIA_API_KEY,   model: 'meta/llama-3.3-70b-instruct' },
+  { name: 'Mistral',  url: 'https://api.mistral.ai/v1/chat/completions',                key: () => process.env.MISTRAL_API_KEY,  model: 'mistral-large-latest' },
 ]
 
 // ── /api/review — SSE streaming ───────────────────────────────────────────────
