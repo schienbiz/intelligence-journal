@@ -152,10 +152,4 @@ app.get('*', (_, res) => res.sendFile(path.join(__dirname, 'dist', 'index.html')
 const PORT = process.env.PORT || 3000
 app.listen(PORT, () => {
   console.log(`[intelligence-journal] port ${PORT}`)
-  // Self-ping every 14 min to prevent Render free tier spin-down (15-min idle threshold)
-  if (process.env.NODE_ENV === 'production') {
-    const selfUrl = process.env.APP_URL || 'https://intelligence-journal.onrender.com'
-    setInterval(() => fetch(`${selfUrl}/health`).catch(() => {}), 14 * 60 * 1000)
-    console.log('[spindown-guard] active')
-  }
 })
