@@ -1,11 +1,15 @@
 import express from 'express'
 import { fileURLToPath } from 'url'
 import path from 'path'
+import { readFileSync } from 'fs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const app = express()
 app.use(express.json({ limit: '50kb' }))
 app.use(express.static(path.join(__dirname, 'dist')))
+
+const ICHING = JSON.parse(readFileSync(path.join(__dirname, 'src/data/iching.json'), 'utf8'))
+const TAROT  = JSON.parse(readFileSync(path.join(__dirname, 'src/data/tarot.json'), 'utf8'))
 
 app.get('/health', (_, res) => res.json({ ok: true }))
 
@@ -143,6 +147,161 @@ ${content}
   } catch (e) {
     if (!res.headersSent) res.status(502).json({ error: e.message })
     else { res.write(`data: ${JSON.stringify({ error: e.message })}\n\n`); res.end() }
+  }
+})
+
+// ── /api/oracle — 4-Agent sequential pipeline ─────────────────────────────────
+async function callAI(provider, messages, maxTokens) {
+  if (!provider.key()) throw new Error(`No key: ${provider.name}`)
+  const r = await fetch(provider.url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${provider.key()}` },
+    body: JSON.stringify({ model: provider.model, max_tokens: maxTokens, temperature: 0.7, stream: false, messages }),
+  })
+  if (!r.ok) throw new Error(`${provider.name} ${r.status}: ${await r.text().catch(() => '')}`)
+  const data = await r.json()
+  const msg = data.choices?.[0]?.message
+  // Cerebras gpt-oss-120b returns reasoning separately; content may be null
+  return ((msg?.content ?? msg?.reasoning) || '').trim()
+}
+
+function parseJSON(text) {
+  const m = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/) || text.match(/(\{[\s\S]*\})/)
+  try { return JSON.parse(m ? m[1] : text) } catch { return null }
+}
+
+app.post('/api/oracle', rateLimit, async (req, res) => {
+  const { question } = req.body
+  if (!question?.trim()) return res.status(400).json({ error: 'no question' })
+
+  res.setHeader('Content-Type', 'text/event-stream')
+  res.setHeader('Cache-Control', 'no-cache')
+  res.setHeader('Connection', 'keep-alive')
+
+  let closed = false
+  res.on('close', () => { closed = true })
+  const send = obj => { if (!closed) res.write(`data: ${JSON.stringify(obj)}\n\n`) }
+  const keepAlive = setInterval(() => { if (!closed) res.write(': ping\n\n') }, 15_000)
+
+  try {
+    // ── Stage 1: Scout (Groq llama-4-scout) ──────────────────────────────────
+    send({ stage: 'scout' })
+    const ichingList = ICHING.map(h => `${h.hex}.${h.zh}(${h.en})`).join(' ')
+    const majorList  = TAROT.filter(c => c.suit === 'major').map(c => `${c.rank}.${c.name}`).join(' ')
+
+    const scoutRaw = await callAI(REVIEW_PROVIDERS[0], [{
+      role: 'user',
+      content:
+`Business decision question: "${question}"
+
+I Ching hexagrams (id.Chinese(English)):
+${ichingList}
+
+Tarot Major Arcana (rank.Name):
+${majorList}
+
+Select 1-2 hexagrams and 1-2 Major Arcana cards that best resonate with this specific business situation.
+Output JSON only — no text outside the JSON block:
+{"hexagrams":[{"id":1,"zh":"乾","en":"Initiating","reason":"..."}],"tarot":[{"rank":0,"name":"The Fool","reason":"..."}]}`
+    }], 500)
+
+    if (closed) return
+    const scout = parseJSON(scoutRaw)
+    if (!scout?.hexagrams?.length) throw new Error('Scout returned invalid JSON')
+    send({ stage: 'scout', ok: true, scout })
+
+    // ── Stage 2: Analyst (Cerebras gpt-oss-120b) ─────────────────────────────
+    send({ stage: 'analyst' })
+    const hexDetail = (scout.hexagrams || []).map(h => {
+      const f = ICHING.find(i => i.hex === h.id) || {}
+      return `${f.font || ''} 卦${h.id} ${f.zh}「${f.en}」— ${h.reason}`
+    }).join('\n')
+    const tarotDetail = (scout.tarot || []).map(t => {
+      const c = TAROT.find(x => x.name === t.name) || {}
+      return `${t.name}: 關鍵詞[${(c.keywords||[]).join(',')}] 光[${(c.light||[]).slice(0,2).join(';')}] 影[${(c.shadow||[]).slice(0,2).join(';')}]`
+    }).join('\n')
+
+    const analystRaw = await callAI(REVIEW_PROVIDERS[1], [{
+      role: 'user',
+      content:
+`Business question: "${question}"
+
+I Ching selected:
+${hexDetail}
+
+Tarot selected:
+${tarotDetail}
+
+Analyze how these systems illuminate this business decision. Find convergence points.
+Output JSON only:
+{"iching_analysis":"...","tarot_analysis":"...","convergence":["point1","point2","point3"]}`
+    }], 1500)
+
+    if (closed) return
+    const analyst = parseJSON(analystRaw)
+    if (!analyst?.iching_analysis) throw new Error('Analyst returned invalid JSON')
+    send({ stage: 'analyst', ok: true })
+
+    // ── Stage 3: Synth (NVIDIA llama-3.3-70b) ────────────────────────────────
+    send({ stage: 'synth' })
+    const synthRaw = await callAI(REVIEW_PROVIDERS[2], [{
+      role: 'user',
+      content:
+`Decision question: "${question}"
+
+Cross-system analysis:
+易經洞察: ${analyst.iching_analysis}
+塔羅洞察: ${analyst.tarot_analysis}
+共振點: ${(analyst.convergence || []).join(' / ')}
+
+Synthesize into actionable business intelligence in 繁體中文.
+Output JSON only:
+{"insight":"...","action":"...","timing":"...","risks":["...","..."]}`
+    }], 900)
+
+    if (closed) return
+    const synth = parseJSON(synthRaw)
+    if (!synth?.insight) throw new Error('Synth returned invalid JSON')
+    send({ stage: 'synth', ok: true })
+
+    // ── Stage 4: Validator (Mistral mistral-large-latest) ────────────────────
+    send({ stage: 'validator' })
+    const hexSymbol  = (scout.hexagrams || []).map(h => { const f = ICHING.find(i => i.hex === h.id); return f ? `${f.font}${f.zh}` : '' }).join(' ')
+    const tarotSymbol = (scout.tarot || []).map(t => t.name).join(' + ')
+
+    const result = await callAI(REVIEW_PROVIDERS[3], [{
+      role: 'user',
+      content:
+`Decision question: "${question}"
+
+Oracle insight to validate and finalize:
+核心洞察: ${synth.insight}
+建議行動: ${synth.action}
+時機: ${synth.timing}
+風險: ${(synth.risks || []).join('; ')}
+
+Ensure the guidance is specific to THIS question (not generic platitudes), actionable within 1-2 weeks.
+Output the final Oracle reading in markdown, 繁體中文, under 350 words:
+
+## ${hexSymbol} × ${tarotSymbol}
+[1-2句卦象與牌義的交叉共振]
+
+## 💡 決策指引
+[針對「${question}」的具體行動建議]
+
+## ⚡ 時機與風險
+[時機判斷 + 2個關鍵風險警示]`
+    }], 800)
+
+    if (closed) return
+    send({ stage: 'validator', ok: true, result })
+    send({ done: true })
+    res.end()
+  } catch (e) {
+    console.error('[oracle]', e.message)
+    if (!closed) { send({ error: e.message }); res.end() }
+  } finally {
+    clearInterval(keepAlive)
   }
 })
 

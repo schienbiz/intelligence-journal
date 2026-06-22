@@ -1,0 +1,450 @@
+[
+  {
+    "hex": 1,
+    "font": "䷀",
+    "zh": "乾",
+    "pinyin": "qián",
+    "en": "Initiating"
+  },
+  {
+    "hex": 2,
+    "font": "䷁",
+    "zh": "坤",
+    "pinyin": "kūn",
+    "en": "Responding"
+  },
+  {
+    "hex": 3,
+    "font": "䷂",
+    "zh": "屯",
+    "pinyin": "zhūn",
+    "en": "Beginning"
+  },
+  {
+    "hex": 4,
+    "font": "䷃",
+    "zh": "蒙",
+    "pinyin": "méng",
+    "en": "Childhood"
+  },
+  {
+    "hex": 5,
+    "font": "䷄",
+    "zh": "需",
+    "pinyin": "xū",
+    "en": "Needing"
+  },
+  {
+    "hex": 6,
+    "font": "䷅",
+    "zh": "訟",
+    "pinyin": "sòng",
+    "en": "Contention"
+  },
+  {
+    "hex": 7,
+    "font": "䷆",
+    "zh": "師",
+    "pinyin": "shī",
+    "en": "Multitude"
+  },
+  {
+    "hex": 8,
+    "font": "䷇",
+    "zh": "比",
+    "pinyin": "bǐ",
+    "en": "Union"
+  },
+  {
+    "hex": 9,
+    "font": "䷈",
+    "zh": "小畜",
+    "pinyin": "xiǎochù",
+    "en": "Little Accumulation"
+  },
+  {
+    "hex": 10,
+    "font": "䷉",
+    "zh": "履",
+    "pinyin": "lǚ",
+    "en": "Fulfillment"
+  },
+  {
+    "hex": 11,
+    "font": "䷊",
+    "zh": "泰",
+    "pinyin": "tài",
+    "en": "Advance"
+  },
+  {
+    "hex": 12,
+    "font": "䷋",
+    "zh": "否",
+    "pinyin": "pǐ",
+    "en": "Hindrance"
+  },
+  {
+    "hex": 13,
+    "font": "䷌",
+    "zh": "同人",
+    "pinyin": "tóngrén",
+    "en": "Seeking Harmony"
+  },
+  {
+    "hex": 14,
+    "font": "䷍",
+    "zh": "大有",
+    "pinyin": "dàyǒu",
+    "en": "Great Harvest"
+  },
+  {
+    "hex": 15,
+    "font": "䷎",
+    "zh": "謙",
+    "pinyin": "qiān",
+    "en": "Humbleness"
+  },
+  {
+    "hex": 16,
+    "font": "䷏",
+    "zh": "豫",
+    "pinyin": "yù",
+    "en": "Delight"
+  },
+  {
+    "hex": 17,
+    "font": "䷐",
+    "zh": "隨",
+    "pinyin": "suí",
+    "en": "Following"
+  },
+  {
+    "hex": 18,
+    "font": "䷑",
+    "zh": "蠱",
+    "pinyin": "gǔ",
+    "en": "Remedying"
+  },
+  {
+    "hex": 19,
+    "font": "䷒",
+    "zh": "臨",
+    "pinyin": "lín",
+    "en": "Approaching"
+  },
+  {
+    "hex": 20,
+    "font": "䷓",
+    "zh": "觀",
+    "pinyin": "guān",
+    "en": "Watching"
+  },
+  {
+    "hex": 21,
+    "font": "䷔",
+    "zh": "噬嗑",
+    "pinyin": "shìkè",
+    "en": "Eradicating"
+  },
+  {
+    "hex": 22,
+    "font": "䷕",
+    "zh": "賁",
+    "pinyin": "bì",
+    "en": "Adorning"
+  },
+  {
+    "hex": 23,
+    "font": "䷖",
+    "zh": "剝",
+    "pinyin": "bō",
+    "en": "Falling Away"
+  },
+  {
+    "hex": 24,
+    "font": "䷗",
+    "zh": "復",
+    "pinyin": "fù",
+    "en": "Turning Back"
+  },
+  {
+    "hex": 25,
+    "font": "䷘",
+    "zh": "無妄",
+    "pinyin": "wúwàng",
+    "en": "Without Falsehood"
+  },
+  {
+    "hex": 26,
+    "font": "䷙",
+    "zh": "大畜",
+    "pinyin": "dàchù",
+    "en": "Great Accumulation"
+  },
+  {
+    "hex": 27,
+    "font": "䷚",
+    "zh": "頤",
+    "pinyin": "yí",
+    "en": "Nourishing"
+  },
+  {
+    "hex": 28,
+    "font": "䷛",
+    "zh": "大過",
+    "pinyin": "dàguò",
+    "en": "Great Exceeding"
+  },
+  {
+    "hex": 29,
+    "font": "䷜",
+    "zh": "坎",
+    "pinyin": "kǎn",
+    "en": "Darkness"
+  },
+  {
+    "hex": 30,
+    "font": "䷝",
+    "zh": "離",
+    "pinyin": "lí",
+    "en": "Brightness"
+  },
+  {
+    "hex": 31,
+    "font": "䷞",
+    "zh": "咸",
+    "pinyin": "xián",
+    "en": "Mutual Influence"
+  },
+  {
+    "hex": 32,
+    "font": "䷟",
+    "zh": "恆",
+    "pinyin": "héng",
+    "en": "Long Lasting"
+  },
+  {
+    "hex": 33,
+    "font": "䷠",
+    "zh": "遯",
+    "pinyin": "dùn",
+    "en": "Retreat"
+  },
+  {
+    "hex": 34,
+    "font": "䷡",
+    "zh": "大壯",
+    "pinyin": "dàzhuàng",
+    "en": "Great Strength"
+  },
+  {
+    "hex": 35,
+    "font": "䷢",
+    "zh": "晉",
+    "pinyin": "jìn",
+    "en": "Proceeding Forward"
+  },
+  {
+    "hex": 36,
+    "font": "䷣",
+    "zh": "明夷",
+    "pinyin": "míngyí",
+    "en": "Brilliance Injured"
+  },
+  {
+    "hex": 37,
+    "font": "䷤",
+    "zh": "家人",
+    "pinyin": "jiārén",
+    "en": "Household"
+  },
+  {
+    "hex": 38,
+    "font": "䷥",
+    "zh": "睽",
+    "pinyin": "kuí",
+    "en": "Diversity"
+  },
+  {
+    "hex": 39,
+    "font": "䷦",
+    "zh": "蹇",
+    "pinyin": "jiǎn",
+    "en": "Hardship"
+  },
+  {
+    "hex": 40,
+    "font": "䷧",
+    "zh": "解",
+    "pinyin": "xiè",
+    "en": "Relief"
+  },
+  {
+    "hex": 41,
+    "font": "䷨",
+    "zh": "損",
+    "pinyin": "sǔn",
+    "en": "Decreasing"
+  },
+  {
+    "hex": 42,
+    "font": "䷩",
+    "zh": "益",
+    "pinyin": "yì",
+    "en": "Increasing"
+  },
+  {
+    "hex": 43,
+    "font": "䷪",
+    "zh": "夬",
+    "pinyin": "guài",
+    "en": "Eliminating"
+  },
+  {
+    "hex": 44,
+    "font": "䷫",
+    "zh": "姤",
+    "pinyin": "gòu",
+    "en": "Encountering"
+  },
+  {
+    "hex": 45,
+    "font": "䷬",
+    "zh": "萃",
+    "pinyin": "cuì",
+    "en": "Bringing Together"
+  },
+  {
+    "hex": 46,
+    "font": "䷭",
+    "zh": "升",
+    "pinyin": "shēng",
+    "en": "Growing Upward"
+  },
+  {
+    "hex": 47,
+    "font": "䷮",
+    "zh": "困",
+    "pinyin": "kùn",
+    "en": "Exhausting"
+  },
+  {
+    "hex": 48,
+    "font": "䷯",
+    "zh": "井",
+    "pinyin": "jǐng",
+    "en": "Replenishing"
+  },
+  {
+    "hex": 49,
+    "font": "䷰",
+    "zh": "革",
+    "pinyin": "gé",
+    "en": "Abolishing The Old"
+  },
+  {
+    "hex": 50,
+    "font": "䷱",
+    "zh": "鼎",
+    "pinyin": "dǐng",
+    "en": "Establishing The New"
+  },
+  {
+    "hex": 51,
+    "font": "䷲",
+    "zh": "震",
+    "pinyin": "zhèn",
+    "en": "Taking Action"
+  },
+  {
+    "hex": 52,
+    "font": "䷳",
+    "zh": "艮",
+    "pinyin": "gèn",
+    "en": "Keeping Still"
+  },
+  {
+    "hex": 53,
+    "font": "䷴",
+    "zh": "漸",
+    "pinyin": "jiàn",
+    "en": "Developing Gradually"
+  },
+  {
+    "hex": 54,
+    "font": "䷵",
+    "zh": "歸妹",
+    "pinyin": "guīmèi",
+    "en": "Marrying Maiden"
+  },
+  {
+    "hex": 55,
+    "font": "䷶",
+    "zh": "豐",
+    "pinyin": "fēng",
+    "en": "Abundance"
+  },
+  {
+    "hex": 56,
+    "font": "䷷",
+    "zh": "旅",
+    "pinyin": "lǚ",
+    "en": "Travelling"
+  },
+  {
+    "hex": 57,
+    "font": "䷸",
+    "zh": "巽",
+    "pinyin": "xùn",
+    "en": "Proceeding Humbly"
+  },
+  {
+    "hex": 58,
+    "font": "䷹",
+    "zh": "兌",
+    "pinyin": "duì",
+    "en": "Joyful"
+  },
+  {
+    "hex": 59,
+    "font": "䷺",
+    "zh": "渙",
+    "pinyin": "huàn",
+    "en": "Dispersing"
+  },
+  {
+    "hex": 60,
+    "font": "䷻",
+    "zh": "節",
+    "pinyin": "jié",
+    "en": "Restricting"
+  },
+  {
+    "hex": 61,
+    "font": "䷼",
+    "zh": "中孚",
+    "pinyin": "zhōngfú",
+    "en": "Innermost Sincerity"
+  },
+  {
+    "hex": 62,
+    "font": "䷽",
+    "zh": "小過",
+    "pinyin": "xiǎoguò",
+    "en": "Little Exceeding"
+  },
+  {
+    "hex": 63,
+    "font": "䷾",
+    "zh": "既濟",
+    "pinyin": "jìjì",
+    "en": "Already Fulfilled"
+  },
+  {
+    "hex": 64,
+    "font": "䷿",
+    "zh": "未濟",
+    "pinyin": "wèijì",
+    "en": "Not Yet Fulfilled"
+  }
+]

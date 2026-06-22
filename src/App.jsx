@@ -108,22 +108,34 @@ export default function App() {
   const [tab, setTab]               = useState("log");
   const [saveState, setSaveState]   = useState("idle");
   const [loaded, setLoaded]         = useState(false);
-  const [copyState, setCopyState]   = useState("idle");   // idle | copied
-  const [clearPending, setClearPending] = useState(false); // review clear confirm
+  const [copyState, setCopyState]   = useState("idle");
+  const [clearPending, setClearPending] = useState(false);
+  // Oracle state
+  const [oQuestion, setOQuestion]   = useState("");
+  const [oResult, setOResult]       = useState("");
+  const [oLoading, setOLoading]     = useState(false);
+  const [oStage, setOStage]         = useState(null);   // scout|analyst|synth|validator
+  const [oScout, setOScout]         = useState(null);   // {hexagrams, tarot}
+  const [oCopyState, setOCopyState] = useState("idle");
   const timer      = useRef(null);
   const abortRef   = useRef(null);
+  const oAbortRef  = useRef(null);
   const wk = getWeekKey(weekOffset);
 
   // Load from storage — also abort any in-flight review and reset transient state
   useEffect(() => {
     abortRef.current?.abort();
-    setRevLoading(false);
+    oAbortRef.current?.abort();
+    setRevLoading(false); setOLoading(false);
     setClearPending(false);
     setLoaded(false);
     const jRaw = sGet(`j:${wk}`);
     const rRaw = sGet(`r:${wk}`);
+    const oRaw = sGet(`o:${wk}`);
     try { setWeekData(jRaw ? JSON.parse(jRaw) : EMPTY_WEEK()); } catch { setWeekData(EMPTY_WEEK()); }
     setReview(rRaw || "");
+    setOResult(oRaw || "");
+    setOScout(null); setOStage(null);
     setLoaded(true);
   }, [wk]);
 
@@ -222,6 +234,46 @@ export default function App() {
 
   const stopReview = () => { abortRef.current?.abort(); setRevLoading(false); };
 
+  // ── Oracle: 4-Agent pipeline ────────────────────────────────────────────────
+  const doOracle = async () => {
+    if (!oQuestion.trim()) return;
+    setOLoading(true); setOResult(""); setOStage("scout"); setOScout(null);
+    const ctrl = new AbortController();
+    oAbortRef.current = ctrl;
+    try {
+      const resp = await fetch("/api/oracle", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question: oQuestion }),
+        signal: ctrl.signal,
+      });
+      if (!resp.ok) { const e = await resp.json(); throw new Error(e.error || "Server error"); }
+      const reader = resp.body.getReader();
+      const dec = new TextDecoder();
+      let buf = "";
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        const lines = buf.split("\n"); buf = lines.pop();
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          let ev;
+          try { ev = JSON.parse(line.slice(6)); } catch { continue; }
+          if (ev.error) throw new Error(ev.error);
+          if (ev.stage) setOStage(ev.stage);
+          if (ev.scout) setOScout(ev.scout);
+          if (ev.result) { sSet(`o:${wk}`, ev.result); setOResult(ev.result); }
+          if (ev.done) { setOLoading(false); return; }
+        }
+      }
+    } catch(e) {
+      if (e.name !== "AbortError") setOResult(`❌ ${e.message}`);
+    }
+    setOLoading(false);
+  };
+  const stopOracle = () => { oAbortRef.current?.abort(); setOLoading(false); };
+
   const copyReview = () => {
     const done = () => { setCopyState("copied"); setTimeout(() => setCopyState("idle"), 2000); };
     if (navigator.clipboard) {
@@ -242,7 +294,7 @@ export default function App() {
     setReview(""); sSet(`r:${wk}`, ""); setClearPending(false);
   };
 
-  const TABS = [["log","📝 每日輸入"],["week","📊 週覽"],["review","🎯 週六複盤"]];
+  const TABS = [["log","📝 每日輸入"],["week","📊 週覽"],["review","🎯 週六複盤"],["oracle","🔮 決策 Oracle"]];
 
   return (
     <div style={{minHeight:"100vh", background:C.bg, color:C.text, fontFamily:"'Georgia','Times New Roman',serif"}}>
@@ -573,6 +625,133 @@ export default function App() {
               <div style={{fontSize:12, lineHeight:1.8}}>
                 點擊上方按鈕生成本週分析<br/>
                 <span style={{fontSize:10}}>結果自動儲存，下次開啟直接查閱</span>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ─ ORACLE ─ */}
+      {tab==="oracle" && (
+        <div style={{padding:"18px", maxWidth:780}}>
+          {/* Header card */}
+          <div style={{background:"#0A0A14", border:`1px solid #3A2A6A`, borderRadius:12, padding:18, marginBottom:18}}>
+            <div style={{fontSize:9, color:"#A080E0", letterSpacing:"0.2em", marginBottom:5}}>決策 ORACLE · 易經 × 塔羅 × 4-Agent AI</div>
+            <div style={{fontSize:12, color:"#B8B098", lineHeight:1.8, marginBottom:14}}>
+              輸入一個本週最重要的商業決策問題，Oracle 以易經卦象與塔羅牌義交叉共振，生成具體決策指引。
+            </div>
+            {/* Question input */}
+            <textarea
+              value={oQuestion}
+              onChange={e => setOQuestion(e.target.value)}
+              placeholder="例：桑黃下半年是否擴大採購量？Dubai 辦事處時機是否成熟？"
+              disabled={oLoading}
+              style={{
+                width:"100%", minHeight:72, background:"#06060F",
+                border:`1px solid ${oLoading ? "#3A2A6A" : "#4A3A8A"}`,
+                borderRadius:8, outline:"none", color:"#D4C8B4",
+                fontSize:12, lineHeight:1.8, resize:"vertical",
+                fontFamily:"'Georgia',serif", padding:10, boxSizing:"border-box",
+                opacity: oLoading ? 0.6 : 1,
+              }}/>
+            <div style={{display:"flex", gap:8, marginTop:10, flexWrap:"wrap", alignItems:"center"}}>
+              {oLoading ? (
+                <button onClick={stopOracle} style={btn(false, {color:C.danger, borderColor:C.danger+"60"})}>⏹ 停止</button>
+              ) : (
+                <button onClick={doOracle} disabled={!oQuestion.trim()}
+                  style={btn(true, {background:"#7C3AED", opacity:oQuestion.trim()?1:0.4})}>
+                  🔮 啟動 Oracle 分析
+                </button>
+              )}
+              {oResult && !oLoading && (
+                <button onClick={() => { navigator.clipboard?.writeText(oResult); setOCopyState("copied"); setTimeout(()=>setOCopyState("idle"),2000); }}
+                  style={btn(false, {fontSize:11, padding:"9px 14px", color:oCopyState==="copied"?C.green:C.textDim, borderColor:oCopyState==="copied"?C.green+"60":C.border})}>
+                  {oCopyState==="copied" ? "✓ 已複製" : "📋 複製"}
+                </button>
+              )}
+              {oResult && !oLoading && (
+                <button onClick={() => { setOResult(""); sSet(`o:${wk}`, ""); }}
+                  style={btn(false, {fontSize:11, padding:"9px 14px", color:C.danger+"99", borderColor:C.danger+"30"})}>
+                  🗑 清除
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Progress stages */}
+          {oLoading && (
+            <div style={{background:C.surf, border:`1px solid #3A2A6A`, borderRadius:12, padding:18, marginBottom:18}}>
+              <div style={{fontSize:9, color:"#A080E0", letterSpacing:"0.15em", marginBottom:14}}>4-AGENT PIPELINE RUNNING</div>
+              {[
+                {key:"scout",    label:"Scout",    desc:"易卦 × 塔羅選卡",     provider:"Groq llama-4-scout"},
+                {key:"analyst",  label:"Analyst",  desc:"深度語義解讀",         provider:"Cerebras gpt-oss-120b"},
+                {key:"synth",    label:"Synth",    desc:"跨系統商業洞察",       provider:"NVIDIA llama-3.3-70b"},
+                {key:"validator",label:"Validator","desc":"驗證與最終輸出",     provider:"Mistral large"},
+              ].map(({key,label,desc,provider}) => {
+                const stages = ["scout","analyst","synth","validator"];
+                const cur = stages.indexOf(oStage);
+                const idx = stages.indexOf(key);
+                const done = idx < cur;
+                const active = idx === cur;
+                return (
+                  <div key={key} style={{display:"flex", alignItems:"center", gap:12, marginBottom:10}}>
+                    <div style={{
+                      width:22, height:22, borderRadius:"50%", flexShrink:0,
+                      display:"flex", alignItems:"center", justifyContent:"center",
+                      fontSize:11, fontWeight:700,
+                      background: done ? "#3A2A6A" : active ? "#7C3AED" : C.surf2,
+                      border: `1px solid ${done ? "#6A4ACA" : active ? "#A080E0" : C.border}`,
+                      color: done ? "#A080E0" : active ? "#fff" : C.textMuted,
+                    }}>
+                      {done ? "✓" : idx+1}
+                    </div>
+                    <div style={{flex:1}}>
+                      <div style={{display:"flex", justifyContent:"space-between"}}>
+                        <span style={{fontSize:12, color: active ? "#D4C8B4" : done ? "#8A80A0" : C.textMuted, fontWeight: active ? 600 : 400}}>
+                          {label} — {desc}
+                        </span>
+                        <span style={{fontSize:9, color:C.textMuted}}>{provider}</span>
+                      </div>
+                      {active && (
+                        <div style={{display:"flex", gap:3, marginTop:4}}>
+                          {[0,1,2].map(i => (
+                            <div key={i} style={{width:5,height:5,borderRadius:"50%",background:"#7C3AED",
+                              animation:`bounce 1.2s ease-in-out ${i*0.2}s infinite`}}/>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+              {/* Scout preview */}
+              {oScout && (
+                <div style={{marginTop:12, paddingTop:12, borderTop:`1px solid ${C.border}`, fontSize:10, color:"#8A80A0"}}>
+                  {oScout.hexagrams?.map(h=>`${h.zh}卦(${h.en})`).join(' + ')}
+                  {oScout.tarot?.length ? ` × ${oScout.tarot.map(t=>t.name).join(' + ')}` : ''}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Result */}
+          {oResult && (
+            <div style={{background:C.surf, border:`1px solid #3A2A6A`, borderRadius:12, padding:22}}>
+              <div style={{fontSize:9, color:"#8A70C0", letterSpacing:"0.15em",
+                marginBottom:14, paddingBottom:12, borderBottom:`1px solid ${C.border}`}}>
+                {wk} · ORACLE READING · 已自動儲存
+              </div>
+              <MarkdownOutput text={oResult} streaming={false} />
+            </div>
+          )}
+
+          {!oResult && !oLoading && (
+            <div style={{background:C.surf, border:`1px solid ${C.border}`,
+              borderRadius:12, padding:32, textAlign:"center", color:C.textMuted}}>
+              <div style={{fontSize:36, marginBottom:12}}>🔮</div>
+              <div style={{fontSize:12, lineHeight:1.8}}>
+                輸入決策問題，啟動易經 × 塔羅跨系統分析<br/>
+                <span style={{fontSize:10}}>分析需 20-40 秒，結果自動儲存</span>
               </div>
             </div>
           )}
