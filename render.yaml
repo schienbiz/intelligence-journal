@@ -9,3 +9,9 @@ services:
         value: production
       - key: GROQ_API_KEY
         sync: false
+      - key: CEREBRAS_API_KEY
+        sync: false
+      - key: NVIDIA_API_KEY
+        sync: false
+      - key: MISTRAL_API_KEY
+        sync: false
