@@ -266,7 +266,7 @@ Output JSON only:
 
     // ── Stage 4: Validator (Mistral mistral-large-latest) ────────────────────
     send({ stage: 'validator' })
-    const hexSymbol  = (scout.hexagrams || []).map(h => { const f = ICHING.find(i => i.hex === h.id); return f ? `${f.font}${f.zh}` : '' }).join(' ')
+    const hexSymbol  = (scout.hexagrams || []).map(h => { const f = ICHING.find(i => +i.hex === +h.id); return f ? `${f.font}${f.zh}` : '' }).join(' ')
     const tarotSymbol = (scout.tarot || []).map(t => t.name).join(' + ')
 
     const result = await callAI(REVIEW_PROVIDERS[3], [{
