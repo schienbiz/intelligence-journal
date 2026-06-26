@@ -250,9 +250,9 @@ Output JSON only:
 `Decision question: "${question}"
 
 Cross-system analysis:
-易經洞察: ${analyst.iching_analysis}
-塔羅洞察: ${analyst.tarot_analysis}
-共振點: ${(analyst.convergence || []).join(' / ')}
+易經洞察: ${analyst.iching_analysis || ''}
+塔羅洞察: ${analyst.tarot_analysis || ''}
+共振點: ${(Array.isArray(analyst.convergence) ? analyst.convergence : []).join(' / ')}
 
 Synthesize into actionable business intelligence in 繁體中文.
 Output JSON only:
@@ -276,9 +276,9 @@ Output JSON only:
 
 Oracle insight to validate and finalize:
 核心洞察: ${synth.insight}
-建議行動: ${synth.action}
-時機: ${synth.timing}
-風險: ${(synth.risks || []).join('; ')}
+建議行動: ${synth.action || ''}
+時機: ${synth.timing || ''}
+風險: ${(Array.isArray(synth.risks) ? synth.risks : []).join('; ')}
 
 Ensure the guidance is specific to THIS question (not generic platitudes), actionable within 1-2 weeks.
 Output the final Oracle reading in markdown, 繁體中文, under 350 words:
