@@ -213,7 +213,7 @@ Output JSON only — no text outside the JSON block:
     // ── Stage 2: Analyst (Cerebras gpt-oss-120b) ─────────────────────────────
     send({ stage: 'analyst' })
     const hexDetail = (scout.hexagrams || []).map(h => {
-      const f = ICHING.find(i => i.hex === h.id) || {}
+      const f = ICHING.find(i => +i.hex === +h.id) || {}
       return `${f.font || ''} 卦${h.id} ${f.zh}「${f.en}」— ${h.reason}`
     }).join('\n')
     const tarotDetail = (scout.tarot || []).map(t => {

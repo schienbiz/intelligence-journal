@@ -274,6 +274,21 @@ export default function App() {
   };
   const stopOracle = () => { oAbortRef.current?.abort(); setOLoading(false); };
 
+  const copyOracle = () => {
+    const done = () => { setOCopyState("copied"); setTimeout(() => setOCopyState("idle"), 2000); };
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(oResult).then(done).catch(() => {
+        const el = document.createElement("textarea");
+        el.value = oResult; document.body.appendChild(el); el.select();
+        document.execCommand("copy"); document.body.removeChild(el); done();
+      });
+    } else {
+      const el = document.createElement("textarea");
+      el.value = oResult; document.body.appendChild(el); el.select();
+      document.execCommand("copy"); document.body.removeChild(el); done();
+    }
+  };
+
   const copyReview = () => {
     const done = () => { setCopyState("copied"); setTimeout(() => setCopyState("idle"), 2000); };
     if (navigator.clipboard) {
@@ -664,7 +679,7 @@ export default function App() {
                 </button>
               )}
               {oResult && !oLoading && (
-                <button onClick={() => { navigator.clipboard?.writeText(oResult); setOCopyState("copied"); setTimeout(()=>setOCopyState("idle"),2000); }}
+                <button onClick={copyOracle}
                   style={btn(false, {fontSize:11, padding:"9px 14px", color:oCopyState==="copied"?C.green:C.textDim, borderColor:oCopyState==="copied"?C.green+"60":C.border})}>
                   {oCopyState==="copied" ? "✓ 已複製" : "📋 複製"}
                 </button>
