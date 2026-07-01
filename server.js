@@ -5,6 +5,16 @@ import { readFileSync } from 'fs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const app = express()
+
+// TEMP DIAG (2026-07-01): identify the external keepalive pinger hitting this
+// service 24/7. Logs UA + forwarded IP for non-asset requests. Remove after capture.
+app.use((req, _res, next) => {
+  if (!req.path.startsWith('/assets') && req.path !== '/favicon.ico') {
+    console.log(`[probe] ${req.method} ${req.path} ua="${req.headers['user-agent'] || '-'}" xff="${req.headers['x-forwarded-for'] || '-'}"`)
+  }
+  next()
+})
+
 app.use(express.json({ limit: '50kb' }))
 app.use(express.static(path.join(__dirname, 'dist')))
 
