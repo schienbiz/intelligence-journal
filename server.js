@@ -5,6 +5,20 @@ import { readFileSync } from 'fs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const app = express()
+
+// Access log for external requests (has x-forwarded-for). This is a free-tier
+// service that should spin down when idle; a hidden 24/7 pinger silently burns the
+// shared Render workspace pool and can suspend sibling services. Logging UA + origin
+// IP of every external hit means any keepalive source is identifiable from the logs
+// with zero guesswork. Skips static assets/health to keep volume near-zero.
+app.use((req, _res, next) => {
+  const xff = req.headers['x-forwarded-for']
+  if (xff && !req.path.startsWith('/assets') && req.path !== '/favicon.ico' && req.path !== '/health') {
+    console.log(`[access] ${req.method} ${req.path} ua="${req.headers['user-agent'] || '-'}" ip="${String(xff).split(',')[0].trim()}"`)
+  }
+  next()
+})
+
 app.use(express.json({ limit: '50kb' }))
 app.use(express.static(path.join(__dirname, 'dist')))
 
