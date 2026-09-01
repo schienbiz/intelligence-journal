@@ -6,6 +6,13 @@ import { readFileSync } from 'fs'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const app = express()
 
+// Render terminates TLS at its own proxy, so without this every request arrives
+// from the same upstream socket: `req.ip` was identical for all visitors and the
+// 8/min rate limit below was a single GLOBAL bucket, not a per-visitor one. The
+// hop count is 1 (Render's proxy) rather than `true`, so the client-controlled
+// leftmost X-Forwarded-For entry cannot be spoofed to escape the limit.
+app.set('trust proxy', 1)
+
 // Access log for external requests (has x-forwarded-for). This is a free-tier
 // service that should spin down when idle; a hidden 24/7 pinger silently burns the
 // shared Render workspace pool and can suspend sibling services. Logging UA + origin
@@ -14,7 +21,11 @@ const app = express()
 app.use((req, _res, next) => {
   const xff = req.headers['x-forwarded-for']
   if (xff && !req.path.startsWith('/assets') && req.path !== '/favicon.ico' && req.path !== '/health') {
-    console.log(`[access] ${req.method} ${req.path} ua="${req.headers['user-agent'] || '-'}" ip="${String(xff).split(',')[0].trim()}"`)
+    // `req.ip` (with trust proxy = 1) is the address Render itself recorded. The
+    // leftmost X-Forwarded-For entry is whatever the caller sent, so a keepalive
+    // pinger could have hidden behind a forged one — which defeats the only
+    // reason this log exists.
+    console.log(`[access] ${req.method} ${req.path} ua="${req.headers['user-agent'] || '-'}" ip="${req.ip}"`)
   }
   next()
 })
@@ -25,7 +36,20 @@ app.use(express.static(path.join(__dirname, 'dist')))
 const ICHING = JSON.parse(readFileSync(path.join(__dirname, 'src/data/iching.json'), 'utf8'))
 const TAROT  = JSON.parse(readFileSync(path.join(__dirname, 'src/data/tarot.json'), 'utf8'))
 
-app.get('/health', (_, res) => res.json({ ok: true }))
+// `ok: true` regardless of whether a single provider still answers is how four
+// dead providers stayed green for weeks. The provider view costs no API calls:
+// it replays what the last real request already learned.
+app.get('/health', (_, res) => {
+  const providers = Object.fromEntries(
+    Object.values(PROVIDERS).map(p => [p.name, providerHealth.get(p.name) || { ok: null, model: p.model, why: 'not called yet' }])
+  )
+  const seen = Object.values(providers).filter(v => v.ok !== null)
+  res.json({
+    ok: true,
+    aiReady: seen.length === 0 ? null : seen.some(v => v.ok),
+    providers,
+  })
+})
 
 // ── Per-IP rate limit: max 8 reviews/min; cleanup every hour ─────────────────
 const rateMap = new Map()
@@ -47,13 +71,159 @@ function rateLimit(req, res, next) {
   next()
 }
 
-// Providers tried in order; first successful response streams to client
-const REVIEW_PROVIDERS = [
-  { name: 'Groq',     url: 'https://api.groq.com/openai/v1/chat/completions',          key: () => process.env.GROQ_API_KEY,     model: 'meta-llama/llama-4-scout-17b-16e-instruct' },
-  { name: 'Cerebras', url: 'https://api.cerebras.ai/v1/chat/completions',               key: () => process.env.CEREBRAS_API_KEY, model: 'gpt-oss-120b' },
-  { name: 'NVIDIA',   url: 'https://integrate.api.nvidia.com/v1/chat/completions',      key: () => process.env.NVIDIA_API_KEY,   model: 'meta/llama-3.3-70b-instruct' },
-  { name: 'Mistral',  url: 'https://api.mistral.ai/v1/chat/completions',                key: () => process.env.MISTRAL_API_KEY,  model: 'mistral-large-latest' },
-]
+// ── Providers ────────────────────────────────────────────────────────────────
+// Model IDs and per-provider parameter support were checked against the live
+// APIs on 2026-09-01. Two things that previously broke silently are now encoded
+// here instead of assumed:
+//   * `reasoningEffort` — Groq and NVIDIA accept `reasoning_effort`; Mistral
+//     answers 400 to it, and Mistral is the last hop, so sending it blindly
+//     would take out the fallback that survives everything else.
+//   * Stages name providers by KEY (see STAGES below), never by array position.
+//     The old code reached into REVIEW_PROVIDERS[0..3] from /api/oracle, so
+//     deleting one dead provider would have silently re-pointed every later
+//     stage at a different model and run stage 4 against `undefined`.
+//
+// Cerebras is deliberately absent: every key on the account answers 402
+// payment_required, so keeping it in a chain only bought a wasted round-trip.
+const PROVIDERS = {
+  groq: {
+    name: 'Groq',
+    url: 'https://api.groq.com/openai/v1/chat/completions',
+    key: () => process.env.GROQ_API_KEY,
+    model: 'openai/gpt-oss-120b',
+    reasoningEffort: true,
+  },
+  nvidia: {
+    name: 'NVIDIA',
+    url: 'https://integrate.api.nvidia.com/v1/chat/completions',
+    key: () => process.env.NVIDIA_API_KEY,
+    model: 'openai/gpt-oss-120b',
+    reasoningEffort: true,
+  },
+  mistral: {
+    name: 'Mistral',
+    url: 'https://api.mistral.ai/v1/chat/completions',
+    key: () => process.env.MISTRAL_API_KEY,
+    model: 'mistral-small-latest',
+    reasoningEffort: false,
+  },
+}
+
+// Every stage gets a full chain. /api/oracle previously had none: one dead
+// provider anywhere in the four stages killed the whole reading.
+//
+// `maxTokens` is sized for a REASONING model. gpt-oss emits its chain of thought
+// against the same budget as the answer, so the old scout ceiling of 500 was
+// measured at 0/6 — reasoning ate 344-498 tokens and the JSON came back truncated
+// with finish_reason=length. `effort: 'low'` cuts reasoning to ~30-70 tokens,
+// which is what makes these ceilings comfortable rather than merely adequate.
+const STAGES = {
+  review:    { chain: ['groq', 'nvidia', 'mistral'], maxTokens: 1200, effort: 'low', stream: true },
+  scout:     { chain: ['groq', 'nvidia', 'mistral'], maxTokens: 1500, effort: 'low', json: true },
+  analyst:   { chain: ['groq', 'nvidia', 'mistral'], maxTokens: 2000, effort: 'low', json: true },
+  synth:     { chain: ['groq', 'nvidia', 'mistral'], maxTokens: 1500, effort: 'low', json: true },
+  validator: { chain: ['groq', 'nvidia', 'mistral'], maxTokens: 1200, effort: 'low' },
+}
+
+const REQUEST_TIMEOUT_MS = 45_000
+
+// Last outcome per provider, updated from traffic we already make. /health reads
+// this instead of probing: an audit probe would itself be a keepalive source and
+// wake a service that is supposed to spin down when idle.
+const providerHealth = new Map()
+function note(provider, ok, why) {
+  providerHealth.set(provider.name, { ok, why, model: provider.model, at: new Date().toISOString() })
+}
+
+function buildBody(provider, messages, opts) {
+  const body = {
+    model: provider.model,
+    max_tokens: opts.maxTokens,
+    temperature: opts.temperature ?? 0.7,
+    stream: !!opts.stream,
+    messages,
+  }
+  if (opts.effort && provider.reasoningEffort) body.reasoning_effort = opts.effort
+  if (opts.json) body.response_format = { type: 'json_object' }
+  return body
+}
+
+async function attempt(provider, messages, opts) {
+  if (!provider.key()) return { ok: false, why: 'no API key configured' }
+  let r
+  try {
+    r = await fetch(provider.url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${provider.key()}` },
+      body: JSON.stringify(buildBody(provider, messages, opts)),
+      // Without this a hung provider hangs the whole chain: four stages in series
+      // with no deadline has no upper bound at all.
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    })
+  } catch (e) {
+    const why = e.name === 'TimeoutError' ? `timeout after ${REQUEST_TIMEOUT_MS}ms` : (e.message || String(e))
+    note(provider, false, why)
+    return { ok: false, why }
+  }
+  if (!r.ok) {
+    // Read the error body even though we discard the response: it carries the
+    // only description of WHY (404 retired model vs 402 unpaid vs 410 EOL), and
+    // an unread body keeps the socket checked out of the connection pool.
+    const detail = (await r.text().catch(() => '')).replace(/\s+/g, ' ').slice(0, 180)
+    const why = `HTTP ${r.status} ${detail}`
+    note(provider, false, why)
+    return { ok: false, why }
+  }
+  note(provider, true, null)
+  return { ok: true, res: r }
+}
+
+// Walks a stage's chain and — the part that was missing — says out loud which
+// providers failed and why. The last outage was four dead providers behind a
+// single generic 502; nothing in the logs named a model or a status code.
+async function callChain(stageName, messages) {
+  const opts = STAGES[stageName]
+  if (!opts) throw new Error(`unknown stage: ${stageName}`)
+  const failures = []
+  for (const id of opts.chain) {
+    const provider = PROVIDERS[id]
+    if (!provider) { failures.push(`${id}: not in registry`); continue }
+    const a = await attempt(provider, messages, opts)
+    if (a.ok) {
+      if (failures.length) console.warn(`[${stageName}] fell through — ${failures.join(' | ')}`)
+      console.log(`[${stageName}] served by ${provider.name} (${provider.model})`)
+      return { res: a.res, provider }
+    }
+    failures.push(`${provider.name}(${provider.model}): ${a.why}`)
+  }
+  console.error(`[${stageName}] ALL PROVIDERS FAILED — ${failures.join(' | ')}`)
+  const err = new Error('All AI providers unavailable')
+  err.failures = failures
+  throw err
+}
+
+// Non-streaming call used by the oracle pipeline.
+async function callText(stageName, messages) {
+  // Guard against the mismatch this refactor actually introduced once: a stage
+  // whose config says `stream: true` returns SSE, and every downstream reader
+  // silently finds zero content instead of failing where the mistake is.
+  if (STAGES[stageName]?.stream) throw new Error(`stage ${stageName} is configured streaming; callText needs a non-streaming stage`)
+  const { res, provider } = await callChain(stageName, messages)
+  const data = await res.json()
+  const choice = data.choices?.[0]
+  const msg = choice?.message
+  const finish = choice?.finish_reason
+  // A reasoning model that spends its budget thinking returns content as an
+  // EMPTY STRING, not null, so `content ?? reasoning` hands back "" and the
+  // caller reports a misleading "invalid JSON". Fall through on empty, not just
+  // on null, and name the real cause.
+  const content = (msg?.content || '').trim() || (msg?.reasoning || '').trim()
+  if (!content) {
+    throw new Error(`${provider.name} returned empty content (finish_reason=${finish}) — likely max_tokens exhausted by reasoning`)
+  }
+  if (finish === 'length') console.warn(`[${stageName}] ${provider.name} hit max_tokens — output may be truncated`)
+  return content
+}
 
 // ── /api/review — SSE streaming ───────────────────────────────────────────────
 app.post('/api/review', rateLimit, async (req, res) => {
@@ -103,82 +273,82 @@ ${content}
 
 [動詞 + 具體目標 + 截止時間]`
 
+  let upstream, servedBy
   try {
-    let upstream, providerName
-    for (const p of REVIEW_PROVIDERS) {
-      if (!p.key()) continue
-      try {
-        const r = await fetch(p.url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${p.key()}` },
-          body: JSON.stringify({ model: p.model, max_tokens: 1200, temperature: 0.7, stream: true, messages: [{ role: 'user', content: prompt }] }),
-        })
-        if (r.ok) { upstream = r; providerName = p.name; break }
-      } catch { /* try next */ }
-    }
-
-    if (!upstream) return res.status(502).json({ error: 'All AI providers unavailable' })
-    console.log(`[review] streaming via ${providerName}`)
-
-    res.setHeader('Content-Type', 'text/event-stream')
-    res.setHeader('Cache-Control', 'no-cache')
-    res.setHeader('Connection', 'keep-alive')
-
-    let closed = false
-    res.on('close', () => { closed = true })
-
-    // SSE keepalive: prevent proxy/Render from closing idle connection during slow providers
-    const keepAlive = setInterval(() => { if (!closed) res.write(': ping\n\n') }, 15_000)
-
-    const reader = upstream.body.getReader()
-    const dec = new TextDecoder()
-    let buf = ''
-
-    try {
-      while (!closed) {
-        const { value, done } = await reader.read()
-        if (done) break
-        buf += dec.decode(value, { stream: true })
-        const lines = buf.split('\n')
-        buf = lines.pop()
-
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue
-          const data = line.slice(6)
-          if (data === '[DONE]') { res.write('data: [DONE]\n\n'); res.end(); return }
-          try {
-            const parsed = JSON.parse(data)
-            const text = parsed.choices?.[0]?.delta?.content
-            if (text) res.write(`data: ${JSON.stringify({ text })}\n\n`)
-          } catch {}
-        }
-      }
-      res.write('data: [DONE]\n\n')
-      res.end()
-    } finally {
-      clearInterval(keepAlive)
-    }
+    ({ res: upstream, provider: servedBy } = await callChain('review', [{ role: 'user', content: prompt }]))
   } catch (e) {
-    if (!res.headersSent) res.status(502).json({ error: e.message })
-    else { res.write(`data: ${JSON.stringify({ error: e.message })}\n\n`); res.end() }
+    return res.status(502).json({ error: e.message, providers: e.failures || [] })
+  }
+
+  res.setHeader('Content-Type', 'text/event-stream')
+  res.setHeader('Cache-Control', 'no-cache')
+  res.setHeader('Connection', 'keep-alive')
+
+  let closed = false
+  res.on('close', () => { closed = true })
+
+  // SSE keepalive: prevent proxy/Render from closing idle connection during slow providers
+  const keepAlive = setInterval(() => { if (!closed) res.write(': ping\n\n') }, 15_000)
+
+  const reader = upstream.body.getReader()
+  const dec = new TextDecoder()
+  let buf = ''
+  let emitted = 0
+
+  try {
+    while (!closed) {
+      const { value, done } = await reader.read()
+      if (done) break
+      buf += dec.decode(value, { stream: true })
+      const lines = buf.split('\n')
+      buf = lines.pop()
+
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue
+        const data = line.slice(6)
+        if (data === '[DONE]') { finish(); return }
+        try {
+          const parsed = JSON.parse(data)
+          const delta = parsed.choices?.[0]?.delta
+          const text = delta?.content
+          if (text) { emitted += text.length; res.write(`data: ${JSON.stringify({ text })}\n\n`) }
+          // A reasoning model sends dozens of `reasoning` deltas before the first
+          // `content` one (measured: first content at chunk 46 of 95 at default
+          // effort). Forwarding a contentless progress tick keeps the client from
+          // rendering a blank panel while the model is still thinking.
+          else if (delta?.reasoning) res.write(`data: ${JSON.stringify({ thinking: true })}\n\n`)
+        } catch {}
+      }
+    }
+    finish()
+  } catch (e) {
+    if (!closed) { res.write(`data: ${JSON.stringify({ error: e.message })}\n\n`); res.end() }
+  } finally {
+    clearInterval(keepAlive)
+    // The stream is abandoned when the client leaves; without cancelling, the
+    // upstream connection stays open until GC gets to it.
+    reader.cancel().catch(() => {})
+  }
+
+  // A stream that ends having emitted zero characters used to reach the browser
+  // as a clean [DONE]. The client then saved "" over the week's cached review and
+  // showed an empty panel with no error — the failure looked like a blank page.
+  function finish() {
+    if (closed) return
+    if (emitted === 0) {
+      console.error(`[review] ${servedBy.name} streamed zero content — treating as failure`)
+      // r.ok only proves the response HEADERS were fine; a stream can still come
+      // back empty. Without this, /health would keep calling the provider healthy
+      // on exactly the failure mode that started this whole investigation.
+      note(servedBy, false, 'streamed zero content')
+      res.write(`data: ${JSON.stringify({ error: '模型回傳空內容（可能是 max_tokens 被推理耗盡）' })}\n\n`)
+    }
+    res.write('data: [DONE]\n\n')
+    res.end()
   }
 })
 
 // ── /api/oracle — 4-Agent sequential pipeline ─────────────────────────────────
-async function callAI(provider, messages, maxTokens) {
-  if (!provider.key()) throw new Error(`No key: ${provider.name}`)
-  const r = await fetch(provider.url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${provider.key()}` },
-    body: JSON.stringify({ model: provider.model, max_tokens: maxTokens, temperature: 0.7, stream: false, messages }),
-  })
-  if (!r.ok) throw new Error(`${provider.name} ${r.status}: ${await r.text().catch(() => '')}`)
-  const data = await r.json()
-  const msg = data.choices?.[0]?.message
-  // Cerebras gpt-oss-120b returns reasoning separately; content may be null
-  return ((msg?.content ?? msg?.reasoning) || '').trim()
-}
-
 function parseJSON(text) {
   const m = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/) || text.match(/(\{[\s\S]*\})/)
   try { return JSON.parse(m ? m[1] : text) } catch { return null }
@@ -198,12 +368,12 @@ app.post('/api/oracle', rateLimit, async (req, res) => {
   const keepAlive = setInterval(() => { if (!closed) res.write(': ping\n\n') }, 15_000)
 
   try {
-    // ── Stage 1: Scout (Groq llama-4-scout) ──────────────────────────────────
+    // ── Stage 1: Scout — pick resonant hexagrams/cards, JSON out ─────────────
     send({ stage: 'scout' })
     const ichingList = ICHING.map(h => `${h.hex}.${h.zh}(${h.en})`).join(' ')
     const majorList  = TAROT.filter(c => c.suit === 'major').map(c => `${c.rank}.${c.name}`).join(' ')
 
-    const scoutRaw = await callAI(REVIEW_PROVIDERS[0], [{
+    const scoutRaw = await callText('scout', [{
       role: 'user',
       content:
 `Business decision question: "${question}"
@@ -217,14 +387,14 @@ ${majorList}
 Select 1-2 hexagrams and 1-2 Major Arcana cards that best resonate with this specific business situation.
 Output JSON only — no text outside the JSON block:
 {"hexagrams":[{"id":1,"zh":"乾","en":"Initiating","reason":"..."}],"tarot":[{"rank":0,"name":"The Fool","reason":"..."}]}`
-    }], 500)
+    }])
 
     if (closed) return
     const scout = parseJSON(scoutRaw)
     if (!scout?.hexagrams?.length) throw new Error('Scout returned invalid JSON')
     send({ stage: 'scout', ok: true, scout })
 
-    // ── Stage 2: Analyst (Cerebras gpt-oss-120b) ─────────────────────────────
+    // ── Stage 2: Analyst — cross-system reading, JSON out ────────────────────
     send({ stage: 'analyst' })
     const hexDetail = (scout.hexagrams || []).map(h => {
       const f = ICHING.find(i => +i.hex === +h.id) || {}
@@ -235,7 +405,7 @@ Output JSON only — no text outside the JSON block:
       return `${t.name}: 關鍵詞[${(c.keywords||[]).join(',')}] 光[${(c.light||[]).slice(0,2).join(';')}] 影[${(c.shadow||[]).slice(0,2).join(';')}]`
     }).join('\n')
 
-    const analystRaw = await callAI(REVIEW_PROVIDERS[1], [{
+    const analystRaw = await callText('analyst', [{
       role: 'user',
       content:
 `Business question: "${question}"
@@ -249,16 +419,16 @@ ${tarotDetail}
 Analyze how these systems illuminate this business decision. Find convergence points.
 Output JSON only:
 {"iching_analysis":"...","tarot_analysis":"...","convergence":["point1","point2","point3"]}`
-    }], 1500)
+    }])
 
     if (closed) return
     const analyst = parseJSON(analystRaw)
     if (!analyst?.iching_analysis) throw new Error('Analyst returned invalid JSON')
     send({ stage: 'analyst', ok: true })
 
-    // ── Stage 3: Synth (NVIDIA llama-3.3-70b) ────────────────────────────────
+    // ── Stage 3: Synth — actionable synthesis, JSON out ──────────────────────
     send({ stage: 'synth' })
-    const synthRaw = await callAI(REVIEW_PROVIDERS[2], [{
+    const synthRaw = await callText('synth', [{
       role: 'user',
       content:
 `Decision question: "${question}"
@@ -271,19 +441,19 @@ Cross-system analysis:
 Synthesize into actionable business intelligence in 繁體中文.
 Output JSON only:
 {"insight":"...","action":"...","timing":"...","risks":["...","..."]}`
-    }], 900)
+    }])
 
     if (closed) return
     const synth = parseJSON(synthRaw)
     if (!synth?.insight) throw new Error('Synth returned invalid JSON')
     send({ stage: 'synth', ok: true })
 
-    // ── Stage 4: Validator (Mistral mistral-large-latest) ────────────────────
+    // ── Stage 4: Validator — final markdown reading ──────────────────────────
     send({ stage: 'validator' })
     const hexSymbol  = (scout.hexagrams || []).map(h => { const f = ICHING.find(i => +i.hex === +h.id); return f ? `${f.font}${f.zh}` : '' }).join(' ')
     const tarotSymbol = (scout.tarot || []).map(t => t.name).join(' + ')
 
-    const result = await callAI(REVIEW_PROVIDERS[3], [{
+    const result = await callText('validator', [{
       role: 'user',
       content:
 `Decision question: "${question}"
@@ -305,7 +475,7 @@ Output the final Oracle reading in markdown, 繁體中文, under 350 words:
 
 ## ⚡ 時機與風險
 [時機判斷 + 2個關鍵風險警示]`
-    }], 800)
+    }])
 
     if (closed) return
     send({ stage: 'validator', ok: true, result })
@@ -318,6 +488,11 @@ Output the final Oracle reading in markdown, 繁體中文, under 350 words:
     clearInterval(keepAlive)
   }
 })
+
+// An unknown /api path used to fall through to the SPA and answer HTML with a
+// 200, so a typo'd or renamed endpoint looked like a JSON parse error on the
+// client instead of a 404.
+app.all('/api/*', (req, res) => res.status(404).json({ error: `no such endpoint: ${req.method} ${req.path}` }))
 
 // SPA fallback
 app.get('*', (_, res) => res.sendFile(path.join(__dirname, 'dist', 'index.html')))

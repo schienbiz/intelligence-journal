@@ -217,10 +217,21 @@ export default function App() {
         for (const line of lines) {
           if (!line.startsWith("data: ")) continue;
           const data = line.slice(6);
-          if (data === "[DONE]") { sSet(`r:${wk}`, full); setRevLoading(false); return; }
+          // Only cache a review that actually has text. Persisting "" on an empty
+          // stream overwrote the week's good result and left a blank panel that
+          // looked like a rendering bug rather than a provider failure.
+          if (data === "[DONE]") {
+            if (full) sSet(`r:${wk}`, full);
+            else setReview("❌ 模型沒有回傳任何內容，請再試一次。");
+            setRevLoading(false);
+            return;
+          }
           try {
             const parsed = JSON.parse(data);
             if (parsed.error) throw new Error(parsed.error);
+            // Reasoning models think for many chunks before the first visible
+            // token; without this the panel sits empty and looks hung.
+            if (parsed.thinking) { if (!full) setReview("💭 模型思考中…"); continue; }
             if (parsed.text) { full += parsed.text; setReview(full); }
           } catch(e) { if (e.name !== "SyntaxError") throw e; }
         }
