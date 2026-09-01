@@ -44,9 +44,15 @@ app.get('/health', (_, res) => {
     Object.values(PROVIDERS).map(p => [p.name, providerHealth.get(p.name) || { ok: null, model: p.model, why: 'not called yet' }])
   )
   const seen = Object.values(providers).filter(v => v.ok !== null)
+  // The one line worth alerting on: a provider whose last failure was structural
+  // is a retired model or a dead key, and it will not recover by itself.
+  const structural = Object.entries(providers)
+    .filter(([, v]) => v.ok === false && v.kind === 'structural')
+    .map(([name, v]) => `${name}: ${v.why}`)
   res.json({
     ok: true,
     aiReady: seen.length === 0 ? null : seen.some(v => v.ok),
+    structuralFailures: structural,
     providers,
   })
 })
@@ -131,8 +137,18 @@ const REQUEST_TIMEOUT_MS = 45_000
 // this instead of probing: an audit probe would itself be a keepalive source and
 // wake a service that is supposed to spin down when idle.
 const providerHealth = new Map()
-function note(provider, ok, why) {
-  providerHealth.set(provider.name, { ok, why, model: provider.model, at: new Date().toISOString() })
+
+// A 429 or a timeout means "busy, try again in a minute". A 401/402/404/410
+// means the chain itself is wrong and no amount of waiting will fix it. Folding
+// both into a bare ok:false is precisely what made a total outage look like an
+// ordinary busy afternoon — so the two are kept apart and only the structural
+// kind is worth waking someone for.
+function classify(status) {
+  if (status === 408 || status === 429 || status >= 500) return 'transient'
+  return 'structural'
+}
+function note(provider, ok, why, kind) {
+  providerHealth.set(provider.name, { ok, why, kind: ok ? null : (kind || 'structural'), model: provider.model, at: new Date().toISOString() })
 }
 
 function buildBody(provider, messages, opts) {
@@ -162,7 +178,7 @@ async function attempt(provider, messages, opts) {
     })
   } catch (e) {
     const why = e.name === 'TimeoutError' ? `timeout after ${REQUEST_TIMEOUT_MS}ms` : (e.message || String(e))
-    note(provider, false, why)
+    note(provider, false, why, 'transient')
     return { ok: false, why }
   }
   if (!r.ok) {
@@ -171,7 +187,7 @@ async function attempt(provider, messages, opts) {
     // an unread body keeps the socket checked out of the connection pool.
     const detail = (await r.text().catch(() => '')).replace(/\s+/g, ' ').slice(0, 180)
     const why = `HTTP ${r.status} ${detail}`
-    note(provider, false, why)
+    note(provider, false, why, classify(r.status))
     return { ok: false, why }
   }
   note(provider, true, null)
@@ -340,7 +356,7 @@ ${content}
       // r.ok only proves the response HEADERS were fine; a stream can still come
       // back empty. Without this, /health would keep calling the provider healthy
       // on exactly the failure mode that started this whole investigation.
-      note(servedBy, false, 'streamed zero content')
+      note(servedBy, false, 'streamed zero content', 'structural')
       res.write(`data: ${JSON.stringify({ error: '模型回傳空內容（可能是 max_tokens 被推理耗盡）' })}\n\n`)
     }
     res.write('data: [DONE]\n\n')
