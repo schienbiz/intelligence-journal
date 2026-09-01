@@ -41,7 +41,7 @@ const TAROT  = JSON.parse(readFileSync(path.join(__dirname, 'src/data/tarot.json
 // it replays what the last real request already learned.
 app.get('/health', (_, res) => {
   const providers = Object.fromEntries(
-    Object.values(PROVIDERS).map(p => [p.name, providerHealth.get(p.name) || { ok: null, model: p.model, why: 'not called yet' }])
+    Object.values(PROVIDERS).map(p => [p.name, providerHealth.get(p.name) || { ok: null, kind: null, model: p.model, why: 'not called yet' }])
   )
   const seen = Object.values(providers).filter(v => v.ok !== null)
   // The one line worth alerting on: a provider whose last failure was structural
@@ -165,7 +165,14 @@ function buildBody(provider, messages, opts) {
 }
 
 async function attempt(provider, messages, opts) {
-  if (!provider.key()) return { ok: false, why: 'no API key configured' }
+  if (!provider.key()) {
+    // Recorded, not just returned. A provider skipped for a missing key would
+    // otherwise sit at "not called yet" on /health forever — the same shape as a
+    // provider that is simply idle, when in fact it can never serve anything.
+    const why = 'no API key configured'
+    note(provider, false, why, 'structural')
+    return { ok: false, why }
+  }
   let r
   try {
     r = await fetch(provider.url, {
